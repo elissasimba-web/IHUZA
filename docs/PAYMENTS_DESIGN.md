@@ -1,13 +1,14 @@
 # IHUZA+ payment and ledger design — review draft
 
-Status: design for review. No payment rail, wallet balance, settlement, or verified receipt is implemented by this document.
+Status: test-only ledger prototype installed on 2026-11-03; production payment design remains for review. No payment rail, wallet balance, settlement, or verified receipt is implemented.
 
 ## What exists now
 
 - Customer checkout creates a server-priced `PENDING` Smart Invoice with item snapshots and an idempotency key.
 - Invoice list and detail are scoped to the customer and merchant owner.
 - The applied `transactions` migration has amount, currency, payment method/reference, and status, but no API writes to it yet.
-- There is no ledger, funding rail, provider callback verification, reconciliation process, or Receipt Vault record of a verified payment.
+- `test_ledger_*` tables and `test_ledger_transfer` provide an isolated RWF test ledger with paired postings, a posted-balance view, key-based retries, and overspend checks for test users. No API invokes it; no production ledger exists.
+- There is no funding rail, provider callback verification, reconciliation process, or Receipt Vault record of a verified payment.
 
 ## Gaps in the applied schema
 
@@ -43,10 +44,10 @@ Status: design for review. No payment rail, wallet balance, settlement, or verif
 - Customer and merchant authorization, refunds, and linked receipt history need database integration tests.
 - No real-money route may be enabled until a lawful funding/settlement rail, credentials, callback verification, and operational reconciliation have been agreed and tested.
 
-## Decisions needed before implementing the ledger/payment migrations
+## Decisions needed before implementing production ledger/payment migrations
 
 1. Which first rail will supply and settle real funds, and who holds customer funds? A provider integration cannot be assumed from the existing code.
 2. Should the first release support full invoice payment only, with partial payments, advances, and debt kept as later explicit flows?
 3. What fee and refund rules apply? No fee or tax amount should be invented by the backend.
 
-Until these decisions are made, the safest next implementation is non-financial: improve invoice lifecycle/access or build a test-only ledger prototype that cannot mark payments successful or create receipts.
+The test ledger proves basic posting rules, but it is deliberately separate from invoices and `transactions`. Its database integration test covers balanced entries, idempotent retry, insufficient test funds, append-only entries, and rollback. Concurrent transfer safety and any real-money flow remain unverified. The next production work must wait for the funding and settlement decisions above.
