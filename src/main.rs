@@ -77,6 +77,11 @@ struct CreateProductRequest {
     barcode: Option<String>,
 }
 
+#[derive(Deserialize)]
+struct UpdateProductPriceRequest {
+    price: String,
+}
+
 #[derive(Serialize, Deserialize)]
 struct CreatedProductResponse {
     id: String,
@@ -225,6 +230,7 @@ fn app(pool: PgPool) -> Router {
             "/merchant/products",
             post(create_product).get(list_merchant_products),
         )
+        .route("/merchant/products/{id}", patch(update_product_price))
         .route("/qr/{reference}/catalog", get(catalog_from_account_qr))
         .route(
             "/admin/merchant-applications/{id}/approve",
@@ -324,6 +330,41 @@ async fn create_product(
             currency,
         }),
     ))
+}
+
+async fn update_product_price(
+    State(state): State<AppState>,
+    Path(product_id): Path<String>,
+    headers: HeaderMap,
+    Json(request): Json<UpdateProductPriceRequest>,
+) -> Result<Json<CreatedProductResponse>, ApiError> {
+    let merchant_id = authenticated_merchant_id(&state.pool, &headers).await?;
+    let price = request.price.trim();
+    if !valid_catalog_price(price) {
+        return Err(ApiError::bad_request(
+            "Price must be a non-negative decimal with at most two decimal places",
+        ));
+    }
+
+    let (id, name, price, currency) = sqlx::query_as::<_, (String, String, String, String)>(
+        "UPDATE products SET price = $3::numeric, updated_at = NOW()
+         WHERE merchant_id = $1::uuid AND id::text = $2 AND is_active = TRUE
+         RETURNING id::text, name, price::text, btrim(currency)",
+    )
+    .bind(&merchant_id)
+    .bind(&product_id)
+    .bind(price)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|_| ApiError::internal())?
+    .ok_or_else(|| ApiError::not_found("Product was not found"))?;
+
+    Ok(Json(CreatedProductResponse {
+        id,
+        name,
+        price,
+        currency,
+    }))
 }
 
 async fn list_merchant_products(
@@ -1311,6 +1352,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn product_price_update_requires_a_bearer_token() {
+        let pool = PgPoolOptions::new()
+            .connect_lazy("postgres://ignored:ignored@127.0.0.1:5432/ihuza")
+            .expect("a lazy test pool should be valid");
+        let request = Request::builder()
+            .method("PATCH")
+            .uri("/merchant/products/00000000-0000-0000-0000-000000000000")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"price":"1600.00"}"#))
+            .expect("request should be valid");
+
+        let response = app(pool)
+            .oneshot(request)
+            .await
+            .expect("the route should return a response");
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
     async fn merchant_catalog_requires_a_bearer_token() {
         let pool = PgPoolOptions::new()
             .connect_lazy("postgres://ignored:ignored@127.0.0.1:5432/ihuza")
@@ -1664,6 +1724,32 @@ mod tests {
                 return Err("product was not scoped to the approved merchant".to_owned());
             }
 
+            let update_request = Request::builder()
+                .method("PATCH")
+                .uri(format!("/merchant/products/{}", product.id))
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {applicant_token}"))
+                .body(Body::from(r#"{"price":"1600.00"}"#))
+                .map_err(|error| error.to_string())?;
+            let update_response = app(pool.clone())
+                .oneshot(update_request)
+                .await
+                .map_err(|error| error.to_string())?;
+            if update_response.status() != StatusCode::OK {
+                return Err(format!(
+                    "product price update returned {}",
+                    update_response.status()
+                ));
+            }
+            let update_body = axum::body::to_bytes(update_response.into_body(), usize::MAX)
+                .await
+                .map_err(|error| error.to_string())?;
+            let updated: CreatedProductResponse =
+                serde_json::from_slice(&update_body).map_err(|error| error.to_string())?;
+            if updated.id != product.id || updated.price != "1600.00" {
+                return Err("merchant price update did not return the new price".to_owned());
+            }
+
             let list_request = Request::builder()
                 .method("GET")
                 .uri("/merchant/products?limit=1&offset=0")
@@ -1682,7 +1768,7 @@ mod tests {
                 .map_err(|error| error.to_string())?;
             let listed: Vec<CreatedProductResponse> =
                 serde_json::from_slice(&list_body).map_err(|error| error.to_string())?;
-            if listed.len() != 1 || listed[0].id != product.id {
+            if listed.len() != 1 || listed[0].id != product.id || listed[0].price != "1600.00" {
                 return Err("approved merchant could not list the new product".to_owned());
             }
             let catalog_request = Request::builder()
@@ -1706,7 +1792,7 @@ mod tests {
             if catalog.business_name != "Approval Test Shop"
                 || catalog.products.len() != 1
                 || catalog.products[0].id != product.id
-                || catalog.products[0].price != "1500.50"
+                || catalog.products[0].price != "1600.00"
             {
                 return Err("QR catalog did not show the approved merchant product".to_owned());
             }
