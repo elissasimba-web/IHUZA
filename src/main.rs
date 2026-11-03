@@ -1,4 +1,7 @@
-use std::env;
+use std::{
+    collections::{HashMap, HashSet},
+    env,
+};
 
 use argon2::{
     Argon2, PasswordHasher, PasswordVerifier,
@@ -109,6 +112,34 @@ struct CatalogProductResponse {
 struct MerchantCatalogResponse {
     business_name: String,
     products: Vec<CatalogProductResponse>,
+}
+
+#[derive(Deserialize)]
+struct CheckoutQuoteRequest {
+    items: Vec<CheckoutQuoteItemRequest>,
+}
+
+#[derive(Deserialize)]
+struct CheckoutQuoteItemRequest {
+    product_id: String,
+    quantity: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct CheckoutQuoteLineResponse {
+    product_id: String,
+    product_name: String,
+    quantity: String,
+    unit_price: String,
+    subtotal: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct CheckoutQuoteResponse {
+    business_name: String,
+    currency: String,
+    items: Vec<CheckoutQuoteLineResponse>,
+    total: String,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -232,6 +263,7 @@ fn app(pool: PgPool) -> Router {
         )
         .route("/merchant/products/{id}", patch(update_product_price))
         .route("/qr/{reference}/catalog", get(catalog_from_account_qr))
+        .route("/qr/{reference}/quote", post(quote_from_account_qr))
         .route(
             "/admin/merchant-applications/{id}/approve",
             post(approve_merchant_application),
@@ -412,51 +444,14 @@ async fn catalog_from_account_qr(
     headers: HeaderMap,
     Query(query): Query<ProductListQuery>,
 ) -> Result<Json<MerchantCatalogResponse>, ApiError> {
-    let Some(session_token) = bearer_token(&headers) else {
-        return Err(ApiError::unauthorized());
-    };
-    let is_customer = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS (
-             SELECT 1 FROM user_roles ur JOIN roles r ON r.id = ur.role_id
-             WHERE ur.user_id = u.id AND r.name = 'CUSTOMER'
-         )
-         FROM user_sessions s JOIN users u ON u.id = s.user_id
-         WHERE s.token_hash = $1
-           AND s.revoked_at IS NULL
-           AND s.expires_at > NOW()
-           AND u.is_active = TRUE",
-    )
-    .bind(hash_session_token(session_token))
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(|_| ApiError::internal())?
-    .ok_or_else(ApiError::unauthorized)?;
-    if !is_customer {
-        return Err(ApiError::customer_forbidden());
-    }
+    require_customer(&state.pool, &headers).await?;
+    let merchant = approved_merchant_from_reference(&state.pool, &reference).await?;
 
     let limit = query.limit.unwrap_or(20);
     let offset = query.offset.unwrap_or(0);
     if !(1..=50).contains(&limit) || !(0..=100_000).contains(&offset) {
         return Err(ApiError::bad_request("Invalid product page"));
     }
-    if reference.len() != 48 || !reference.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return Err(ApiError::not_found("Merchant catalog was not found"));
-    }
-
-    let merchant = sqlx::query_as::<_, (String, String)>(
-        "SELECT m.id::text, m.business_name
-         FROM users u
-         JOIN merchant_profiles m ON m.user_id = u.id AND m.status = 'APPROVED'
-         JOIN user_roles ur ON ur.user_id = u.id
-         JOIN roles r ON r.id = ur.role_id AND r.name = 'MERCHANT'
-         WHERE u.account_qr_reference = $1 AND u.is_active = TRUE",
-    )
-    .bind(&reference)
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(|_| ApiError::internal())?
-    .ok_or_else(|| ApiError::not_found("Merchant catalog was not found"))?;
 
     let products = sqlx::query_as::<_, (String, String, String, String, Option<String>)>(
         "SELECT p.id::text, p.name, p.price::text, btrim(p.currency), image.image_url
@@ -492,6 +487,168 @@ async fn catalog_from_account_qr(
             )
             .collect(),
     }))
+}
+
+async fn require_customer(pool: &PgPool, headers: &HeaderMap) -> Result<(), ApiError> {
+    let Some(session_token) = bearer_token(&headers) else {
+        return Err(ApiError::unauthorized());
+    };
+    let is_customer = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS (
+             SELECT 1 FROM user_roles ur JOIN roles r ON r.id = ur.role_id
+             WHERE ur.user_id = u.id AND r.name = 'CUSTOMER'
+         )
+         FROM user_sessions s JOIN users u ON u.id = s.user_id
+         WHERE s.token_hash = $1
+           AND s.revoked_at IS NULL
+           AND s.expires_at > NOW()
+           AND u.is_active = TRUE",
+    )
+    .bind(hash_session_token(session_token))
+    .fetch_optional(pool)
+    .await
+    .map_err(|_| ApiError::internal())?
+    .ok_or_else(ApiError::unauthorized)?;
+    if !is_customer {
+        return Err(ApiError::customer_forbidden());
+    }
+    Ok(())
+}
+
+async fn approved_merchant_from_reference(
+    pool: &PgPool,
+    reference: &str,
+) -> Result<(String, String), ApiError> {
+    if reference.len() != 48 || !reference.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(ApiError::not_found("Merchant catalog was not found"));
+    }
+
+    sqlx::query_as::<_, (String, String)>(
+        "SELECT m.id::text, m.business_name
+         FROM users u
+         JOIN merchant_profiles m ON m.user_id = u.id AND m.status = 'APPROVED'
+         JOIN user_roles ur ON ur.user_id = u.id
+         JOIN roles r ON r.id = ur.role_id AND r.name = 'MERCHANT'
+         WHERE u.account_qr_reference = $1 AND u.is_active = TRUE",
+    )
+    .bind(&reference)
+    .fetch_optional(pool)
+    .await
+    .map_err(|_| ApiError::internal())?
+    .ok_or_else(|| ApiError::not_found("Merchant catalog was not found"))
+}
+
+async fn quote_from_account_qr(
+    State(state): State<AppState>,
+    Path(reference): Path<String>,
+    headers: HeaderMap,
+    Json(request): Json<CheckoutQuoteRequest>,
+) -> Result<Json<CheckoutQuoteResponse>, ApiError> {
+    require_customer(&state.pool, &headers).await?;
+    let merchant = approved_merchant_from_reference(&state.pool, &reference).await?;
+    if request.items.is_empty() || request.items.len() > 50 {
+        return Err(ApiError::bad_request("Quote must contain 1 to 50 items"));
+    }
+
+    let mut seen = HashSet::new();
+    let mut selected = Vec::with_capacity(request.items.len());
+    for item in request.items {
+        let id = item.product_id.trim().to_ascii_lowercase();
+        let quantity = parse_decimal_units(item.quantity.trim(), 17, 3)
+            .filter(|quantity| *quantity > 0)
+            .ok_or_else(|| ApiError::bad_request("Invalid item quantity"))?;
+        if id.len() != 36
+            || !id
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() || byte == b'-')
+            || !seen.insert(id.clone())
+        {
+            return Err(ApiError::bad_request("Invalid or duplicate product ID"));
+        }
+        selected.push((id, quantity));
+    }
+
+    let ids: Vec<String> = selected.iter().map(|(id, _)| id.clone()).collect();
+    let products = sqlx::query_as::<_, (String, String, String, String)>(
+        "SELECT id::text, name, price::text, btrim(currency)
+         FROM products
+         WHERE merchant_id = $1::uuid AND id::text = ANY($2) AND is_active = TRUE",
+    )
+    .bind(&merchant.0)
+    .bind(&ids)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(|_| ApiError::internal())?;
+    let products: HashMap<_, _> = products
+        .into_iter()
+        .map(|(id, name, price, currency)| (id, (name, price, currency)))
+        .collect();
+
+    let mut lines = Vec::with_capacity(selected.len());
+    let mut total_cents = 0_u128;
+    const MAX_CENTS: u128 = 99_999_999_999_999_999_999;
+    for (id, quantity_milli) in selected {
+        let (name, price, currency) = products
+            .get(&id)
+            .ok_or_else(|| ApiError::bad_request("Product is unavailable for this merchant"))?;
+        if currency != "RWF" {
+            return Err(ApiError::bad_request("Unsupported product currency"));
+        }
+        let price_cents = parse_decimal_units(price, 18, 2).ok_or_else(ApiError::internal)?;
+        let subtotal_cents = line_subtotal_cents(price_cents, quantity_milli)
+            .filter(|amount| *amount <= MAX_CENTS)
+            .ok_or_else(|| ApiError::bad_request("Quote amount is too large"))?;
+        total_cents = total_cents
+            .checked_add(subtotal_cents)
+            .filter(|amount| *amount <= MAX_CENTS)
+            .ok_or_else(|| ApiError::bad_request("Quote amount is too large"))?;
+        lines.push(CheckoutQuoteLineResponse {
+            product_id: id,
+            product_name: name.clone(),
+            quantity: format!("{}.{:03}", quantity_milli / 1000, quantity_milli % 1000),
+            unit_price: format_money(price_cents),
+            subtotal: format_money(subtotal_cents),
+        });
+    }
+
+    Ok(Json(CheckoutQuoteResponse {
+        business_name: merchant.1,
+        currency: "RWF".to_owned(),
+        items: lines,
+        total: format_money(total_cents),
+    }))
+}
+
+fn parse_decimal_units(value: &str, max_integer_digits: usize, scale: usize) -> Option<u128> {
+    let (integer, fraction) = value.split_once('.').unwrap_or((value, ""));
+    if integer.is_empty()
+        || integer.len() > max_integer_digits
+        || !integer.bytes().all(|byte| byte.is_ascii_digit())
+        || fraction.len() > scale
+        || !fraction.bytes().all(|byte| byte.is_ascii_digit())
+        || value.ends_with('.')
+    {
+        return None;
+    }
+    let factor = 10_u128.pow(scale as u32);
+    let whole = integer.parse::<u128>().ok()?.checked_mul(factor)?;
+    let fractional = if fraction.is_empty() {
+        0
+    } else {
+        fraction.parse::<u128>().ok()? * 10_u128.pow((scale - fraction.len()) as u32)
+    };
+    whole.checked_add(fractional)
+}
+
+fn format_money(cents: u128) -> String {
+    format!("{}.{:02}", cents / 100, cents % 100)
+}
+
+fn line_subtotal_cents(price_cents: u128, quantity_milli: u128) -> Option<u128> {
+    price_cents
+        .checked_mul(quantity_milli)?
+        .checked_add(500)
+        .map(|amount| amount / 1000)
 }
 
 fn valid_catalog_price(price: &str) -> bool {
@@ -1314,6 +1471,17 @@ mod tests {
         }
     }
 
+    #[test]
+    fn quote_decimal_math_rounds_each_line_to_two_places() {
+        assert_eq!(parse_decimal_units("0.333", 17, 3), Some(333));
+        assert_eq!(parse_decimal_units("1500.50", 18, 2), Some(150_050));
+        assert_eq!(line_subtotal_cents(150_050, 333), Some(49_967));
+        assert_eq!(format_money(49_967), "499.67");
+        assert_eq!(line_subtotal_cents(1, 500), Some(1));
+        assert_eq!(parse_decimal_units("1.2345", 17, 3), None);
+        assert_eq!(line_subtotal_cents(u128::MAX, 2), None);
+    }
+
     #[tokio::test]
     async fn product_creation_requires_a_bearer_token() {
         let pool = PgPoolOptions::new()
@@ -1379,6 +1547,25 @@ mod tests {
             .method("GET")
             .uri("/qr/000000000000000000000000000000000000000000000000/catalog")
             .body(Body::empty())
+            .expect("request should be valid");
+
+        let response = app(pool)
+            .oneshot(request)
+            .await
+            .expect("the route should return a response");
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn merchant_quote_requires_a_bearer_token() {
+        let pool = PgPoolOptions::new()
+            .connect_lazy("postgres://ignored:ignored@127.0.0.1:5432/ihuza")
+            .expect("a lazy test pool should be valid");
+        let request = Request::builder()
+            .method("POST")
+            .uri("/qr/000000000000000000000000000000000000000000000000/quote")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"items":[{"product_id":"00000000-0000-0000-0000-000000000000","quantity":"1"}]}"#))
             .expect("request should be valid");
 
         let response = app(pool)
@@ -1795,6 +1982,55 @@ mod tests {
                 || catalog.products[0].price != "1600.00"
             {
                 return Err("QR catalog did not show the approved merchant product".to_owned());
+            }
+
+            let quote_request = Request::builder()
+                .method("POST")
+                .uri(format!("/qr/{merchant_reference}/quote"))
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {admin_token}"))
+                .body(Body::from(format!(
+                    r#"{{"items":[{{"product_id":"{}","quantity":"0.333"}}]}}"#,
+                    product.id
+                )))
+                .map_err(|error| error.to_string())?;
+            let quote_response = app(pool.clone())
+                .oneshot(quote_request)
+                .await
+                .map_err(|error| error.to_string())?;
+            if quote_response.status() != StatusCode::OK {
+                return Err(format!("QR quote returned {}", quote_response.status()));
+            }
+            let quote_body = axum::body::to_bytes(quote_response.into_body(), usize::MAX)
+                .await
+                .map_err(|error| error.to_string())?;
+            let quote: CheckoutQuoteResponse =
+                serde_json::from_slice(&quote_body).map_err(|error| error.to_string())?;
+            if quote.business_name != "Approval Test Shop"
+                || quote.currency != "RWF"
+                || quote.total != "532.80"
+                || quote.items.len() != 1
+                || quote.items[0].product_id != product.id
+                || quote.items[0].quantity != "0.333"
+                || quote.items[0].unit_price != "1600.00"
+                || quote.items[0].subtotal != "532.80"
+            {
+                return Err("QR quote did not use the merchant's current price".to_owned());
+            }
+
+            let unavailable_request = Request::builder()
+                .method("POST")
+                .uri(format!("/qr/{merchant_reference}/quote"))
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {admin_token}"))
+                .body(Body::from(r#"{"items":[{"product_id":"00000000-0000-0000-0000-000000000000","quantity":"1"}]}"#))
+                .map_err(|error| error.to_string())?;
+            let unavailable_response = app(pool.clone())
+                .oneshot(unavailable_request)
+                .await
+                .map_err(|error| error.to_string())?;
+            if unavailable_response.status() != StatusCode::BAD_REQUEST {
+                return Err("QR quote accepted an unavailable product".to_owned());
             }
 
             let ordinary_reference: String =
