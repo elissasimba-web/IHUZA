@@ -3438,8 +3438,8 @@ mod tests {
 async fn main() {
     dotenvy::dotenv().ok();
 
-    let database_url = env::var("DATABASE_URL")
-        .expect("DATABASE_URL must be set before starting the IHUZA+ backend");
+    let database_url = env::var("APP_DATABASE_URL")
+        .expect("APP_DATABASE_URL must be set to a limited runtime role before starting IHUZA+");
     let bind_address = env::var("APP_ADDRESS").unwrap_or_else(|_| "127.0.0.1:3000".to_owned());
 
     let pool = PgPoolOptions::new()
@@ -3447,6 +3447,35 @@ async fn main() {
         .connect(&database_url)
         .await
         .expect("Failed to connect to PostgreSQL");
+
+    let runtime_role_is_limited: bool = sqlx::query_scalar(
+        "SELECT NOT r.rolsuper AND NOT r.rolcreatedb AND NOT r.rolcreaterole
+                AND NOT r.rolreplication AND NOT r.rolbypassrls
+                AND NOT has_schema_privilege(current_user, 'public', 'CREATE')
+                AND NOT has_database_privilege(current_user, current_database(), 'CREATE')
+                AND NOT has_table_privilege(current_user, 'wallet_ledger_batches', 'INSERT')
+                AND NOT has_table_privilege(current_user, 'wallet_ledger_batches', 'UPDATE')
+                AND NOT has_table_privilege(current_user, 'wallet_ledger_batches', 'DELETE')
+                AND NOT has_table_privilege(current_user, 'wallet_ledger_batches', 'TRUNCATE')
+                AND NOT has_table_privilege(current_user, 'wallet_ledger_batches', 'TRIGGER')
+                AND NOT has_table_privilege(current_user, 'wallet_ledger_entries', 'INSERT')
+                AND NOT has_table_privilege(current_user, 'wallet_ledger_entries', 'UPDATE')
+                AND NOT has_table_privilege(current_user, 'wallet_ledger_entries', 'DELETE')
+                AND NOT has_table_privilege(current_user, 'wallet_ledger_entries', 'TRUNCATE')
+                AND NOT has_table_privilege(current_user, 'wallet_ledger_entries', 'TRIGGER')
+                AND NOT has_table_privilege(current_user, 'wallet_accounts', 'UPDATE')
+                AND NOT has_table_privilege(current_user, 'wallet_accounts', 'DELETE')
+                AND NOT has_table_privilege(current_user, 'wallet_accounts', 'TRUNCATE')
+                AND NOT has_table_privilege(current_user, 'wallet_accounts', 'TRIGGER')
+         FROM pg_roles r WHERE r.rolname = current_user",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("Failed to verify runtime database privileges");
+    assert!(
+        runtime_role_is_limited,
+        "The backend database role can modify schema or wallet ledger history"
+    );
 
     let app = app(pool);
     let listener = TcpListener::bind(&bind_address)
