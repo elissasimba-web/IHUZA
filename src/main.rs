@@ -119,7 +119,7 @@ struct CheckoutQuoteRequest {
     items: Vec<CheckoutQuoteItemRequest>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 struct CheckoutQuoteItemRequest {
     product_id: String,
     quantity: String,
@@ -140,6 +140,22 @@ struct CheckoutQuoteResponse {
     currency: String,
     items: Vec<CheckoutQuoteLineResponse>,
     total: String,
+}
+
+#[derive(Deserialize)]
+struct CreateInvoiceDraftRequest {
+    items: Vec<CheckoutQuoteItemRequest>,
+    expected_total: String,
+    idempotency_key: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct InvoiceDraftResponse {
+    id: String,
+    invoice_number: String,
+    total: String,
+    currency: String,
+    payment_status: String,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -264,6 +280,7 @@ fn app(pool: PgPool) -> Router {
         .route("/merchant/products/{id}", patch(update_product_price))
         .route("/qr/{reference}/catalog", get(catalog_from_account_qr))
         .route("/qr/{reference}/quote", post(quote_from_account_qr))
+        .route("/qr/{reference}/invoices", post(create_invoice_draft))
         .route(
             "/admin/merchant-applications/{id}/approve",
             post(approve_merchant_application),
@@ -489,12 +506,12 @@ async fn catalog_from_account_qr(
     }))
 }
 
-async fn require_customer(pool: &PgPool, headers: &HeaderMap) -> Result<(), ApiError> {
+async fn require_customer(pool: &PgPool, headers: &HeaderMap) -> Result<String, ApiError> {
     let Some(session_token) = bearer_token(&headers) else {
         return Err(ApiError::unauthorized());
     };
-    let is_customer = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS (
+    let (customer_id, is_customer) = sqlx::query_as::<_, (String, bool)>(
+        "SELECT u.id::text, EXISTS (
              SELECT 1 FROM user_roles ur JOIN roles r ON r.id = ur.role_id
              WHERE ur.user_id = u.id AND r.name = 'CUSTOMER'
          )
@@ -512,7 +529,7 @@ async fn require_customer(pool: &PgPool, headers: &HeaderMap) -> Result<(), ApiE
     if !is_customer {
         return Err(ApiError::customer_forbidden());
     }
-    Ok(())
+    Ok(customer_id)
 }
 
 async fn approved_merchant_from_reference(
@@ -546,6 +563,19 @@ async fn quote_from_account_qr(
 ) -> Result<Json<CheckoutQuoteResponse>, ApiError> {
     require_customer(&state.pool, &headers).await?;
     let merchant = approved_merchant_from_reference(&state.pool, &reference).await?;
+    let mut connection = state
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| ApiError::internal())?;
+    Ok(Json(build_quote(&mut connection, merchant, request).await?))
+}
+
+async fn build_quote(
+    connection: &mut sqlx::PgConnection,
+    merchant: (String, String),
+    request: CheckoutQuoteRequest,
+) -> Result<CheckoutQuoteResponse, ApiError> {
     if request.items.is_empty() || request.items.len() > 50 {
         return Err(ApiError::bad_request("Quote must contain 1 to 50 items"));
     }
@@ -572,11 +602,12 @@ async fn quote_from_account_qr(
     let products = sqlx::query_as::<_, (String, String, String, String)>(
         "SELECT id::text, name, price::text, btrim(currency)
          FROM products
-         WHERE merchant_id = $1::uuid AND id::text = ANY($2) AND is_active = TRUE",
+         WHERE merchant_id = $1::uuid AND id::text = ANY($2) AND is_active = TRUE
+         FOR SHARE",
     )
     .bind(&merchant.0)
     .bind(&ids)
-    .fetch_all(&state.pool)
+    .fetch_all(&mut *connection)
     .await
     .map_err(|_| ApiError::internal())?;
     let products: HashMap<_, _> = products
@@ -611,12 +642,138 @@ async fn quote_from_account_qr(
         });
     }
 
-    Ok(Json(CheckoutQuoteResponse {
+    Ok(CheckoutQuoteResponse {
         business_name: merchant.1,
         currency: "RWF".to_owned(),
         items: lines,
         total: format_money(total_cents),
-    }))
+    })
+}
+
+async fn create_invoice_draft(
+    State(state): State<AppState>,
+    Path(reference): Path<String>,
+    headers: HeaderMap,
+    Json(request): Json<CreateInvoiceDraftRequest>,
+) -> Result<(StatusCode, Json<InvoiceDraftResponse>), ApiError> {
+    let customer_id = require_customer(&state.pool, &headers).await?;
+    let key = request.idempotency_key.trim();
+    if !(16..=128).contains(&key.len())
+        || !key
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+    {
+        return Err(ApiError::bad_request("Invalid idempotency key"));
+    }
+    let expected_cents = parse_decimal_units(request.expected_total.trim(), 18, 2)
+        .ok_or_else(|| ApiError::bad_request("Invalid expected total"))?;
+    let expected_total = format_money(expected_cents);
+    let request_bytes = serde_json::to_vec(&(&reference, &request.expected_total, &request.items))
+        .map_err(|_| ApiError::internal())?;
+    let request_hash = format!("{:x}", Sha256::digest(&request_bytes));
+
+    let mut transaction = state.pool.begin().await.map_err(|_| ApiError::internal())?;
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+        .bind(format!("invoice:{customer_id}:{key}"))
+        .execute(&mut *transaction)
+        .await
+        .map_err(|_| ApiError::internal())?;
+    let existing = sqlx::query_as::<_, (String, String, String, String, String, String)>(
+        "SELECT id::text, invoice_number, total_amount::text, btrim(currency),
+                payment_status, checkout_request_hash
+         FROM invoices
+         WHERE customer_id = $1::uuid AND checkout_idempotency_key = $2",
+    )
+    .bind(&customer_id)
+    .bind(key)
+    .fetch_optional(&mut *transaction)
+    .await
+    .map_err(|_| ApiError::internal())?;
+    if let Some((id, invoice_number, total, currency, payment_status, stored_hash)) = existing {
+        if stored_hash != request_hash {
+            return Err(ApiError::conflict(
+                "Idempotency key was used for another checkout",
+            ));
+        }
+        transaction
+            .commit()
+            .await
+            .map_err(|_| ApiError::internal())?;
+        return Ok((
+            StatusCode::OK,
+            Json(InvoiceDraftResponse {
+                id,
+                invoice_number,
+                total,
+                currency,
+                payment_status,
+            }),
+        ));
+    }
+
+    let merchant = approved_merchant_from_reference(&state.pool, &reference).await?;
+    let quote = build_quote(
+        &mut *transaction,
+        merchant.clone(),
+        CheckoutQuoteRequest {
+            items: request.items,
+        },
+    )
+    .await?;
+    if quote.total != expected_total {
+        return Err(ApiError::conflict("Total changed; request a new quote"));
+    }
+
+    let (id, invoice_number, total, currency, payment_status) =
+        sqlx::query_as::<_, (String, String, String, String, String)>(
+            "INSERT INTO invoices (
+                merchant_id, customer_id, invoice_number, subtotal, total_amount,
+                checkout_idempotency_key, checkout_request_hash
+             ) VALUES (
+                $1::uuid, $2::uuid, concat('IHUZA-', replace(gen_random_uuid()::text, '-', '')),
+                $3::numeric, $3::numeric, $4, $5
+             ) RETURNING id::text, invoice_number, total_amount::text,
+                         btrim(currency), payment_status",
+        )
+        .bind(&merchant.0)
+        .bind(&customer_id)
+        .bind(&quote.total)
+        .bind(key)
+        .bind(&request_hash)
+        .fetch_one(&mut *transaction)
+        .await
+        .map_err(|_| ApiError::internal())?;
+
+    for line in quote.items {
+        sqlx::query(
+            "INSERT INTO invoice_items (
+                invoice_id, product_id, product_name, quantity, unit_price, subtotal
+             ) VALUES ($1::uuid, $2::uuid, $3, $4::numeric, $5::numeric, $6::numeric)",
+        )
+        .bind(&id)
+        .bind(&line.product_id)
+        .bind(&line.product_name)
+        .bind(&line.quantity)
+        .bind(&line.unit_price)
+        .bind(&line.subtotal)
+        .execute(&mut *transaction)
+        .await
+        .map_err(|_| ApiError::internal())?;
+    }
+    transaction
+        .commit()
+        .await
+        .map_err(|_| ApiError::internal())?;
+    Ok((
+        StatusCode::CREATED,
+        Json(InvoiceDraftResponse {
+            id,
+            invoice_number,
+            total,
+            currency,
+            payment_status,
+        }),
+    ))
 }
 
 fn parse_decimal_units(value: &str, max_integer_digits: usize, scale: usize) -> Option<u128> {
@@ -1576,6 +1733,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn invoice_draft_requires_a_bearer_token() {
+        let pool = PgPoolOptions::new()
+            .connect_lazy("postgres://ignored:ignored@127.0.0.1:5432/ihuza")
+            .expect("a lazy test pool should be valid");
+        let request = Request::builder()
+            .method("POST")
+            .uri("/qr/000000000000000000000000000000000000000000000000/invoices")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                r#"{"items":[],"expected_total":"0.00","idempotency_key":"test-invoice-key-123"}"#,
+            ))
+            .expect("request should be valid");
+        let response = app(pool)
+            .oneshot(request)
+            .await
+            .expect("the route should return a response");
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
     async fn register_route_rejects_short_password_before_database_write() {
         let pool = PgPoolOptions::new()
             .connect_lazy("postgres://ignored:ignored@127.0.0.1:5432/ihuza")
@@ -2033,6 +2210,118 @@ mod tests {
                 return Err("QR quote accepted an unavailable product".to_owned());
             }
 
+            let draft_key = format!("draft-approval-{suffix}");
+            let mut first_draft_id = String::new();
+            for (expected_status, total) in [
+                (StatusCode::CREATED, "532.80"),
+                (StatusCode::OK, "532.80"),
+                (StatusCode::CONFLICT, "1.00"),
+            ] {
+                let draft_request = Request::builder()
+                    .method("POST")
+                    .uri(format!("/qr/{merchant_reference}/invoices"))
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {admin_token}"))
+                    .body(Body::from(format!(
+                        r#"{{"items":[{{"product_id":"{}","quantity":"0.333"}}],"expected_total":"{total}","idempotency_key":"{draft_key}"}}"#,
+                        product.id
+                    )))
+                    .map_err(|error| error.to_string())?;
+                let draft_response = app(pool.clone())
+                    .oneshot(draft_request)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                if draft_response.status() != expected_status {
+                    return Err(format!("invoice draft returned {}", draft_response.status()));
+                }
+                if expected_status != StatusCode::CONFLICT {
+                    let body = axum::body::to_bytes(draft_response.into_body(), usize::MAX)
+                        .await
+                        .map_err(|error| error.to_string())?;
+                    let draft: InvoiceDraftResponse =
+                        serde_json::from_slice(&body).map_err(|error| error.to_string())?;
+                    if draft.total != "532.80"
+                        || draft.currency != "RWF"
+                        || draft.payment_status != "PENDING"
+                    {
+                        return Err("invoice draft fields were incorrect".to_owned());
+                    }
+                    if first_draft_id.is_empty() {
+                        first_draft_id = draft.id;
+                    } else if first_draft_id != draft.id {
+                        return Err("idempotent retry created a second invoice".to_owned());
+                    }
+                }
+            }
+            let new_price_request = Request::builder()
+                .method("PATCH")
+                .uri(format!("/merchant/products/{}", product.id))
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {applicant_token}"))
+                .body(Body::from(r#"{"price":"1700.00"}"#))
+                .map_err(|error| error.to_string())?;
+            let new_price_response = app(pool.clone())
+                .oneshot(new_price_request)
+                .await
+                .map_err(|error| error.to_string())?;
+            if new_price_response.status() != StatusCode::OK {
+                return Err("merchant could not change price after invoice draft".to_owned());
+            }
+            let retry_request = Request::builder()
+                .method("POST")
+                .uri(format!("/qr/{merchant_reference}/invoices"))
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {admin_token}"))
+                .body(Body::from(format!(
+                    r#"{{"items":[{{"product_id":"{}","quantity":"0.333"}}],"expected_total":"532.80","idempotency_key":"{draft_key}"}}"#,
+                    product.id
+                )))
+                .map_err(|error| error.to_string())?;
+            let retry_response = app(pool.clone())
+                .oneshot(retry_request)
+                .await
+                .map_err(|error| error.to_string())?;
+            if retry_response.status() != StatusCode::OK {
+                return Err("idempotent retry failed after a catalog price change".to_owned());
+            }
+            let retry_body = axum::body::to_bytes(retry_response.into_body(), usize::MAX)
+                .await
+                .map_err(|error| error.to_string())?;
+            let retried: InvoiceDraftResponse =
+                serde_json::from_slice(&retry_body).map_err(|error| error.to_string())?;
+            if retried.id != first_draft_id || retried.total != "532.80" {
+                return Err("retry changed the original invoice draft".to_owned());
+            }
+            let snapshot = sqlx::query_as::<_, (String, String, String)>(
+                "SELECT product_name, unit_price::text, subtotal::text
+                 FROM invoice_items WHERE invoice_id = $1::uuid",
+            )
+            .bind(&first_draft_id)
+            .fetch_one(&pool)
+            .await
+            .map_err(|error| error.to_string())?;
+            if snapshot != ("Rice".to_owned(), "1600.00".to_owned(), "532.80".to_owned()) {
+                return Err("invoice item snapshot was incorrect".to_owned());
+            }
+
+            let stale_request = Request::builder()
+                .method("POST")
+                .uri(format!("/qr/{merchant_reference}/invoices"))
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {admin_token}"))
+                .body(Body::from(format!(
+                    r#"{{"items":[{{"product_id":"{}","quantity":"0.333"}}],"expected_total":"532.80","idempotency_key":"stale-approval-{suffix}"}}"#,
+                    product.id
+                )))
+                .map_err(|error| error.to_string())?;
+            let stale_response = app(pool.clone())
+                .oneshot(stale_request)
+                .await
+                .map_err(|error| error.to_string())?;
+            if stale_response.status() != StatusCode::CONFLICT {
+                return Err("a stale customer total created an invoice".to_owned());
+            }
+
             let ordinary_reference: String =
                 sqlx::query_scalar("SELECT account_qr_reference FROM users WHERE id = $1::uuid")
                     .bind(&admin_id)
@@ -2056,6 +2345,11 @@ mod tests {
         }
         .await;
 
+        sqlx::query("DELETE FROM invoices WHERE merchant_id = $1::uuid")
+            .bind(&merchant_id)
+            .execute(&pool)
+            .await
+            .expect("approval invoice cleanup should succeed");
         sqlx::query("DELETE FROM security_events WHERE user_id = $1::uuid")
             .bind(&admin_id)
             .execute(&pool)
