@@ -1,6 +1,6 @@
 # IHUZA+ payment and ledger design — review draft
 
-Status: test-only ledger prototype installed on 2026-11-03. The intended product has an IHUZA+ wallet for holding value in each user's account and making internal person-to-person and merchant payments. No production wallet ledger, funding rail, settlement, or verified receipt is implemented.
+Status: an isolated test ledger and a dormant production wallet-ledger schema foundation were installed on 2026-11-03. The intended product has an IHUZA+ wallet for holding value in each user's account and making internal person-to-person and merchant payments. No production transfer service, funding rail, settlement, or verified receipt is implemented.
 
 ## Agreed wallet direction (2026-11-03)
 
@@ -16,7 +16,8 @@ Status: test-only ledger prototype installed on 2026-11-03. The intended product
 - Authenticated `GET /qr/{reference}` resolves the one account QR as an approved merchant checkout destination or an ordinary person transfer destination. It returns a display name and RWF, not a balance or permission to debit; it rejects self-scans. No person-to-person transfer endpoint exists yet.
 - Invoice list and detail are scoped to the customer and merchant owner.
 - The applied `transactions` migration has amount, currency, payment method/reference, and status, but no API writes to it yet.
-- `test_ledger_*` tables and `test_ledger_transfer` provide an isolated RWF test ledger with paired postings, a posted-balance view, key-based retries, and overspend checks for test users. No API invokes it; no production ledger exists.
+- `test_ledger_*` tables and `test_ledger_transfer` provide an isolated RWF test ledger with paired postings, a posted-balance view, key-based retries, and overspend checks for test users. No API invokes it; it is separate from the production wallet-ledger schema.
+- `wallet_accounts`, `wallet_ledger_batches`, `wallet_ledger_entries`, and `wallet_balances` form a separate production-schema foundation. They link one RWF wallet to a user, derive balance from posted entries, reject one-sided batches, reject unbacked spending, and prevent entry mutation through triggers. An additive guard migration also rejects batches created directly as `POSTED`. No user wallet is provisioned automatically and no API or funding flow writes these tables.
 - There is no funding rail, provider callback verification, reconciliation process, or Receipt Vault record of a verified payment.
 
 ## Gaps in the applied schema
@@ -61,4 +62,4 @@ Status: test-only ledger prototype installed on 2026-11-03. The intended product
 3. Decide whether the first release supports full invoice payment only, with partial payments, advances, and debt as later explicit flows.
 4. Agree fee and refund rules. No fee or tax amount should be invented by the backend.
 
-The test ledger proves basic posting rules, but it is deliberately separate from invoices and `transactions`. Its database integration test covers balanced entries, idempotent retry, insufficient test funds, append-only entries, and rollback. Concurrent transfer safety and any real-money flow remain unverified. The production wallet ledger schema and internal-transfer service can be built and tested without choosing a specific external provider; accepting real customer funds must wait for the decisions and verification above.
+The test ledger proves basic posting rules, but it is deliberately separate from invoices and `transactions`. Its database integration test covers balanced entries, idempotent retry, insufficient test funds, append-only entries, and rollback. The new wallet-ledger schema test confirms that unbalanced or unbacked entries cannot be posted and rolls back all fixtures. It does not prove successful funded posting or concurrent transfer safety. Before a transfer service, the backend needs controlled wallet provisioning, a transaction-linked idempotent posting operation, a separate limited database runtime role, concurrency and failure tests, and reconciliation of customer liabilities with safeguarded funds. Accepting real customer funds must wait for the decisions and verification above.
