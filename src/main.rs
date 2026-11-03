@@ -18,7 +18,7 @@ use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use rand_core::{OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use sqlx::{PgPool, postgres::PgPoolOptions};
+use sqlx::{PgConnection, PgPool, postgres::PgPoolOptions};
 use tokio::net::TcpListener;
 
 const MAX_NAME_LENGTH: usize = 100;
@@ -214,6 +214,14 @@ struct AccountQrDestinationResponse {
     currency: &'static str,
 }
 
+#[derive(Deserialize, Serialize)]
+struct WalletSummaryResponse {
+    currency: String,
+    balance: String,
+    status: String,
+    money_operations_enabled: bool,
+}
+
 #[derive(Debug)]
 struct NewRegistration {
     phone_number: String,
@@ -305,6 +313,7 @@ fn app(pool: PgPool) -> Router {
         .route("/auth/logout", post(logout))
         .route("/auth/me", get(current_user))
         .route("/account/qr-reference", get(account_qr_reference))
+        .route("/wallet", post(open_wallet).get(get_wallet))
         .route("/auth/password", patch(change_password))
         .route("/merchants/apply", post(apply_for_merchant))
         .route(
@@ -567,6 +576,79 @@ async fn require_customer(pool: &PgPool, headers: &HeaderMap) -> Result<String, 
         return Err(ApiError::customer_forbidden());
     }
     Ok(customer_id)
+}
+
+async fn wallet_summary(
+    connection: &mut PgConnection,
+    user_id: &str,
+) -> Result<WalletSummaryResponse, ApiError> {
+    let (currency, balance, status) = sqlx::query_as::<_, (String, String, String)>(
+        "SELECT b.currency, b.balance::text, a.status
+         FROM wallet_accounts a
+         JOIN wallet_balances b ON b.account_id = a.id
+         JOIN users u ON u.id = a.user_id AND u.is_active = TRUE
+         WHERE a.user_id = $1::uuid
+           AND EXISTS (
+               SELECT 1 FROM user_roles ur JOIN roles r ON r.id = ur.role_id
+               WHERE ur.user_id = u.id AND r.name = 'CUSTOMER'
+           )",
+    )
+    .bind(user_id)
+    .fetch_optional(connection)
+    .await
+    .map_err(|_| ApiError::internal())?
+    .ok_or_else(|| ApiError::not_found("Wallet has not been opened"))?;
+    Ok(WalletSummaryResponse {
+        currency,
+        balance,
+        status,
+        money_operations_enabled: false,
+    })
+}
+
+async fn provision_wallet(
+    connection: &mut PgConnection,
+    user_id: &str,
+) -> Result<WalletSummaryResponse, ApiError> {
+    sqlx::query(
+        "INSERT INTO wallet_accounts (user_id)
+         SELECT u.id FROM users u
+         WHERE u.id = $1::uuid AND u.is_active = TRUE
+           AND EXISTS (
+               SELECT 1 FROM user_roles ur JOIN roles r ON r.id = ur.role_id
+               WHERE ur.user_id = u.id AND r.name = 'CUSTOMER'
+           )
+         ON CONFLICT (user_id) DO NOTHING",
+    )
+    .bind(user_id)
+    .execute(&mut *connection)
+    .await
+    .map_err(|_| ApiError::internal())?;
+    wallet_summary(connection, user_id).await
+}
+
+async fn open_wallet(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<WalletSummaryResponse>, ApiError> {
+    let user_id = require_customer(&state.pool, &headers).await?;
+    let mut tx = state.pool.begin().await.map_err(|_| ApiError::internal())?;
+    let summary = provision_wallet(&mut tx, &user_id).await?;
+    tx.commit().await.map_err(|_| ApiError::internal())?;
+    Ok(Json(summary))
+}
+
+async fn get_wallet(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<WalletSummaryResponse>, ApiError> {
+    let user_id = require_customer(&state.pool, &headers).await?;
+    let mut connection = state
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| ApiError::internal())?;
+    Ok(Json(wallet_summary(&mut connection, &user_id).await?))
 }
 
 async fn approved_merchant_from_reference(
@@ -2071,6 +2153,107 @@ mod tests {
             .expect("the route should return a response");
 
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn wallet_routes_require_a_bearer_token() {
+        let pool = PgPoolOptions::new()
+            .connect_lazy("postgres://ignored:ignored@127.0.0.1:5432/ihuza")
+            .expect("a lazy test pool should be valid");
+        for method in ["GET", "POST"] {
+            let request = Request::builder()
+                .method(method)
+                .uri("/wallet")
+                .body(Body::empty())
+                .expect("request should be valid");
+            let response = app(pool.clone())
+                .oneshot(request)
+                .await
+                .expect("the route should return a response");
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "requires DATABASE_URL; wallet fixture rows are rolled back"]
+    async fn wallet_provisioning_is_zero_balance_and_idempotent() {
+        let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+        let pool = PgPoolOptions::new()
+            .max_connections(2)
+            .connect(&database_url)
+            .await
+            .expect("test database connection should succeed");
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock should be after the Unix epoch")
+            .as_nanos();
+        let mut tx = pool.begin().await.expect("test transaction should begin");
+        let user_id: String = sqlx::query_scalar(
+            "INSERT INTO users (phone_number, password_hash, first_name)
+             VALUES ($1, 'wallet-provision-test-only-hash', 'Wallet Test') RETURNING id::text",
+        )
+        .bind(format!("wallet-provision-{suffix}"))
+        .fetch_one(&mut *tx)
+        .await
+        .expect("test user should be created");
+
+        let before_role = provision_wallet(&mut tx, &user_id).await;
+        assert!(before_role.is_err(), "a non-customer cannot open a wallet");
+        let count_before_role: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM wallet_accounts WHERE user_id = $1::uuid")
+                .bind(&user_id)
+                .fetch_one(&mut *tx)
+                .await
+                .expect("wallet count should be readable");
+        assert_eq!(count_before_role, 0);
+
+        sqlx::query(
+            "INSERT INTO user_roles (user_id, role_id)
+             SELECT $1::uuid, id FROM roles WHERE name = 'CUSTOMER'",
+        )
+        .bind(&user_id)
+        .execute(&mut *tx)
+        .await
+        .expect("customer role should be assigned");
+
+        for _ in 0..2 {
+            let summary = provision_wallet(&mut tx, &user_id)
+                .await
+                .expect("customer wallet should open or be returned");
+            assert_eq!(summary.currency, "RWF");
+            assert_eq!(summary.balance, "0.00");
+            assert_eq!(summary.status, "ACTIVE");
+            assert!(!summary.money_operations_enabled);
+        }
+        let count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM wallet_accounts WHERE user_id = $1::uuid")
+                .bind(&user_id)
+                .fetch_one(&mut *tx)
+                .await
+                .expect("wallet count should be readable");
+        assert_eq!(count, 1);
+
+        sqlx::query("UPDATE wallet_accounts SET status = 'FROZEN' WHERE user_id = $1::uuid")
+            .bind(&user_id)
+            .execute(&mut *tx)
+            .await
+            .expect("test wallet should be frozen");
+        let frozen = provision_wallet(&mut tx, &user_id)
+            .await
+            .expect("existing wallet should be returned without changing its status");
+        assert_eq!(frozen.status, "FROZEN");
+        assert_eq!(frozen.balance, "0.00");
+
+        tx.rollback()
+            .await
+            .expect("wallet fixture should roll back");
+        let remaining: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM wallet_accounts WHERE user_id = $1::uuid")
+                .bind(&user_id)
+                .fetch_one(&pool)
+                .await
+                .expect("rollback should be verifiable");
+        assert_eq!(remaining, 0);
     }
 
     #[tokio::test]
