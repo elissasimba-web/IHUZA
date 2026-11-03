@@ -158,6 +158,33 @@ struct InvoiceDraftResponse {
     payment_status: String,
 }
 
+#[derive(Serialize, Deserialize)]
+struct InvoiceSummaryResponse {
+    id: String,
+    invoice_number: String,
+    business_name: String,
+    total: String,
+    currency: String,
+    payment_status: String,
+    invoice_date: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct InvoiceItemResponse {
+    product_id: Option<String>,
+    product_name: String,
+    quantity: String,
+    unit_price: String,
+    subtotal: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct InvoiceDetailResponse {
+    #[serde(flatten)]
+    invoice: InvoiceSummaryResponse,
+    items: Vec<InvoiceItemResponse>,
+}
+
 #[derive(Deserialize, Serialize)]
 struct LoginResponse {
     access_token: String,
@@ -281,6 +308,8 @@ fn app(pool: PgPool) -> Router {
         .route("/qr/{reference}/catalog", get(catalog_from_account_qr))
         .route("/qr/{reference}/quote", post(quote_from_account_qr))
         .route("/qr/{reference}/invoices", post(create_invoice_draft))
+        .route("/invoices", get(list_invoices))
+        .route("/invoices/{id}", get(get_invoice))
         .route(
             "/admin/merchant-applications/{id}/approve",
             post(approve_merchant_application),
@@ -774,6 +803,125 @@ async fn create_invoice_draft(
             payment_status,
         }),
     ))
+}
+
+async fn authenticated_user_id(pool: &PgPool, headers: &HeaderMap) -> Result<String, ApiError> {
+    let Some(session_token) = bearer_token(headers) else {
+        return Err(ApiError::unauthorized());
+    };
+    sqlx::query_scalar::<_, String>(
+        "SELECT u.id::text
+         FROM user_sessions s JOIN users u ON u.id = s.user_id
+         WHERE s.token_hash = $1 AND s.revoked_at IS NULL
+           AND s.expires_at > NOW() AND u.is_active = TRUE",
+    )
+    .bind(hash_session_token(session_token))
+    .fetch_optional(pool)
+    .await
+    .map_err(|_| ApiError::internal())?
+    .ok_or_else(ApiError::unauthorized)
+}
+
+type InvoiceSummaryRow = (String, String, String, String, String, String, String);
+
+fn invoice_summary_from_row(
+    (id, invoice_number, business_name, total, currency, payment_status, invoice_date): InvoiceSummaryRow,
+) -> InvoiceSummaryResponse {
+    InvoiceSummaryResponse {
+        id,
+        invoice_number,
+        business_name,
+        total,
+        currency,
+        payment_status,
+        invoice_date,
+    }
+}
+
+async fn list_invoices(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<ProductListQuery>,
+) -> Result<Json<Vec<InvoiceSummaryResponse>>, ApiError> {
+    let user_id = authenticated_user_id(&state.pool, &headers).await?;
+    let limit = query.limit.unwrap_or(20);
+    let offset = query.offset.unwrap_or(0);
+    if !(1..=50).contains(&limit) || !(0..=100_000).contains(&offset) {
+        return Err(ApiError::bad_request("Invalid invoice page"));
+    }
+    let rows = sqlx::query_as::<_, InvoiceSummaryRow>(
+        "SELECT i.id::text, i.invoice_number, m.business_name,
+                i.total_amount::text, btrim(i.currency), i.payment_status,
+                i.invoice_date::text
+         FROM invoices i JOIN merchant_profiles m ON m.id = i.merchant_id
+         WHERE i.customer_id = $1::uuid
+            OR (m.user_id = $1::uuid AND EXISTS (
+                SELECT 1 FROM user_roles ur JOIN roles r ON r.id = ur.role_id
+                WHERE ur.user_id = m.user_id AND r.name = 'MERCHANT'
+            ))
+         ORDER BY i.invoice_date DESC, i.id DESC
+         LIMIT $2 OFFSET $3",
+    )
+    .bind(&user_id)
+    .bind(limit)
+    .bind(offset)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(|_| ApiError::internal())?;
+    Ok(Json(
+        rows.into_iter().map(invoice_summary_from_row).collect(),
+    ))
+}
+
+async fn get_invoice(
+    State(state): State<AppState>,
+    Path(invoice_id): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<InvoiceDetailResponse>, ApiError> {
+    let user_id = authenticated_user_id(&state.pool, &headers).await?;
+    let row = sqlx::query_as::<_, InvoiceSummaryRow>(
+        "SELECT i.id::text, i.invoice_number, m.business_name,
+                i.total_amount::text, btrim(i.currency), i.payment_status,
+                i.invoice_date::text
+         FROM invoices i JOIN merchant_profiles m ON m.id = i.merchant_id
+         WHERE i.id::text = $1 AND (
+             i.customer_id = $2::uuid
+             OR (m.user_id = $2::uuid AND EXISTS (
+                 SELECT 1 FROM user_roles ur JOIN roles r ON r.id = ur.role_id
+                 WHERE ur.user_id = m.user_id AND r.name = 'MERCHANT'
+             ))
+         )",
+    )
+    .bind(&invoice_id)
+    .bind(&user_id)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|_| ApiError::internal())?
+    .ok_or_else(|| ApiError::not_found("Invoice was not found"))?;
+    let invoice = invoice_summary_from_row(row);
+    let rows = sqlx::query_as::<_, (Option<String>, String, String, String, String)>(
+        "SELECT product_id::text, product_name, quantity::text,
+                unit_price::text, subtotal::text
+         FROM invoice_items WHERE invoice_id = $1::uuid
+         ORDER BY created_at, id",
+    )
+    .bind(&invoice.id)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(|_| ApiError::internal())?;
+    let items = rows
+        .into_iter()
+        .map(
+            |(product_id, product_name, quantity, unit_price, subtotal)| InvoiceItemResponse {
+                product_id,
+                product_name,
+                quantity,
+                unit_price,
+                subtotal,
+            },
+        )
+        .collect();
+    Ok(Json(InvoiceDetailResponse { invoice, items }))
 }
 
 fn parse_decimal_units(value: &str, max_integer_digits: usize, scale: usize) -> Option<u128> {
@@ -1753,6 +1901,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn invoice_reads_require_a_bearer_token() {
+        let pool = PgPoolOptions::new()
+            .connect_lazy("postgres://ignored:ignored@127.0.0.1:5432/ihuza")
+            .expect("a lazy test pool should be valid");
+        for uri in [
+            "/invoices",
+            "/invoices/00000000-0000-0000-0000-000000000000",
+        ] {
+            let request = Request::builder()
+                .method("GET")
+                .uri(uri)
+                .body(Body::empty())
+                .expect("request should be valid");
+            let response = app(pool.clone())
+                .oneshot(request)
+                .await
+                .expect("the route should return a response");
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        }
+    }
+
+    #[tokio::test]
     async fn register_route_rejects_short_password_before_database_write() {
         let pool = PgPoolOptions::new()
             .connect_lazy("postgres://ignored:ignored@127.0.0.1:5432/ihuza")
@@ -1933,6 +2103,15 @@ mod tests {
         .fetch_one(&pool)
         .await
         .expect("applicant fixture should be created");
+        let outsider_id = sqlx::query_scalar::<_, String>(
+            "INSERT INTO users (phone_number, password_hash, first_name)
+             VALUES ($1, $2, 'Outsider Test') RETURNING id::text",
+        )
+        .bind(format!("outsider-approval-{suffix}"))
+        .bind(&password_hash)
+        .fetch_one(&pool)
+        .await
+        .expect("outsider fixture should be created");
         let merchant_id = sqlx::query_scalar::<_, String>(
             "INSERT INTO merchant_profiles (user_id, business_name)
              VALUES ($1::uuid, 'Approval Test Shop') RETURNING id::text",
@@ -1960,7 +2139,12 @@ mod tests {
         .expect("customer role fixture should be created");
         let admin_token = generate_session_token();
         let applicant_token = generate_session_token();
-        for (user_id, token) in [(&admin_id, &admin_token), (&applicant_id, &applicant_token)] {
+        let outsider_token = generate_session_token();
+        for (user_id, token) in [
+            (&admin_id, &admin_token),
+            (&applicant_id, &applicant_token),
+            (&outsider_id, &outsider_token),
+        ] {
             sqlx::query(
                 "INSERT INTO user_sessions (user_id, token_hash, expires_at)
                  VALUES ($1::uuid, $2, NOW() + INTERVAL '1 hour')",
@@ -2304,6 +2488,68 @@ mod tests {
                 return Err("invoice item snapshot was incorrect".to_owned());
             }
 
+            for (token, can_read) in [
+                (&admin_token, true),
+                (&applicant_token, true),
+                (&outsider_token, false),
+            ] {
+                let detail_request = Request::builder()
+                    .method("GET")
+                    .uri(format!("/invoices/{first_draft_id}"))
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .map_err(|error| error.to_string())?;
+                let detail_response = app(pool.clone())
+                    .oneshot(detail_request)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                let expected_status = if can_read { StatusCode::OK } else { StatusCode::NOT_FOUND };
+                if detail_response.status() != expected_status {
+                    return Err(format!("invoice detail access returned {}", detail_response.status()));
+                }
+                if can_read {
+                    let body = axum::body::to_bytes(detail_response.into_body(), usize::MAX)
+                        .await
+                        .map_err(|error| error.to_string())?;
+                    let detail: InvoiceDetailResponse =
+                        serde_json::from_slice(&body).map_err(|error| error.to_string())?;
+                    if detail.invoice.id != first_draft_id
+                        || detail.invoice.total != "532.80"
+                        || detail.invoice.payment_status != "PENDING"
+                        || detail.items.len() != 1
+                        || detail.items[0].product_name != "Rice"
+                        || detail.items[0].quantity != "0.333"
+                        || detail.items[0].unit_price != "1600.00"
+                    {
+                        return Err("invoice detail lost its item snapshot".to_owned());
+                    }
+                }
+
+                let list_request = Request::builder()
+                    .method("GET")
+                    .uri("/invoices?limit=10&offset=0")
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .map_err(|error| error.to_string())?;
+                let list_response = app(pool.clone())
+                    .oneshot(list_request)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                if list_response.status() != StatusCode::OK {
+                    return Err(format!("invoice list returned {}", list_response.status()));
+                }
+                let body = axum::body::to_bytes(list_response.into_body(), usize::MAX)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                let listed: Vec<InvoiceSummaryResponse> =
+                    serde_json::from_slice(&body).map_err(|error| error.to_string())?;
+                if (can_read && (listed.len() != 1 || listed[0].id != first_draft_id))
+                    || (!can_read && !listed.is_empty())
+                {
+                    return Err("invoice list exposed or omitted a private invoice".to_owned());
+                }
+            }
+
             let stale_request = Request::builder()
                 .method("POST")
                 .uri(format!("/qr/{merchant_reference}/invoices"))
@@ -2355,9 +2601,10 @@ mod tests {
             .execute(&pool)
             .await
             .expect("approval audit cleanup should succeed");
-        sqlx::query("DELETE FROM users WHERE id::text = $1 OR id::text = $2")
+        sqlx::query("DELETE FROM users WHERE id::text IN ($1, $2, $3)")
             .bind(&admin_id)
             .bind(&applicant_id)
+            .bind(&outsider_id)
             .execute(&pool)
             .await
             .expect("approval user cleanup should succeed");
