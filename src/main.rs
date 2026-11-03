@@ -207,6 +207,13 @@ struct AccountQrReferenceResponse {
     reference: String,
 }
 
+#[derive(Serialize)]
+struct AccountQrDestinationResponse {
+    account_type: &'static str,
+    display_name: String,
+    currency: &'static str,
+}
+
 #[derive(Debug)]
 struct NewRegistration {
     phone_number: String,
@@ -305,6 +312,7 @@ fn app(pool: PgPool) -> Router {
             post(create_product).get(list_merchant_products),
         )
         .route("/merchant/products/{id}", patch(update_product_price))
+        .route("/qr/{reference}", get(resolve_account_qr))
         .route("/qr/{reference}/catalog", get(catalog_from_account_qr))
         .route("/qr/{reference}/quote", post(quote_from_account_qr))
         .route("/qr/{reference}/invoices", post(create_invoice_draft))
@@ -582,6 +590,62 @@ async fn approved_merchant_from_reference(
     .await
     .map_err(|_| ApiError::internal())?
     .ok_or_else(|| ApiError::not_found("Merchant catalog was not found"))
+}
+
+async fn resolve_account_qr(
+    State(state): State<AppState>,
+    Path(reference): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<AccountQrDestinationResponse>, ApiError> {
+    let viewer_id = require_customer(&state.pool, &headers).await?;
+    if reference.len() != 48 || !reference.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(ApiError::not_found("Account QR was not found"));
+    }
+
+    let destination = sqlx::query_as::<_, (String, String, Option<String>, Option<String>, bool)>(
+        "SELECT u.id::text, u.first_name, u.last_name, m.business_name,
+                EXISTS (
+                    SELECT 1 FROM user_roles ur JOIN roles r ON r.id = ur.role_id
+                    WHERE ur.user_id = u.id AND r.name = 'CUSTOMER'
+                )
+         FROM users u
+         LEFT JOIN merchant_profiles m ON m.user_id = u.id AND m.status = 'APPROVED'
+           AND EXISTS (
+               SELECT 1 FROM user_roles ur JOIN roles r ON r.id = ur.role_id
+               WHERE ur.user_id = u.id AND r.name = 'MERCHANT'
+           )
+         WHERE u.account_qr_reference = $1 AND u.is_active = TRUE",
+    )
+    .bind(&reference)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|_| ApiError::internal())?
+    .ok_or_else(|| ApiError::not_found("Account QR was not found"))?;
+
+    if destination.0 == viewer_id {
+        return Err(ApiError::bad_request(
+            "Your own QR is not a payment destination",
+        ));
+    }
+    if let Some(business_name) = destination.3 {
+        return Ok(Json(AccountQrDestinationResponse {
+            account_type: "MERCHANT_CHECKOUT",
+            display_name: business_name,
+            currency: "RWF",
+        }));
+    }
+    if !destination.4 {
+        return Err(ApiError::not_found("Account QR was not found"));
+    }
+    let display_name = match destination.2 {
+        Some(last_name) => format!("{} {}", destination.1, last_name),
+        None => destination.1,
+    };
+    Ok(Json(AccountQrDestinationResponse {
+        account_type: "PERSON_TRANSFER",
+        display_name,
+        currency: "RWF",
+    }))
 }
 
 async fn quote_from_account_qr(
@@ -2010,6 +2074,23 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn account_qr_resolution_requires_a_bearer_token() {
+        let pool = PgPoolOptions::new()
+            .connect_lazy("postgres://ignored:ignored@127.0.0.1:5432/ihuza")
+            .expect("a lazy test pool should be valid");
+        let request = Request::builder()
+            .method("GET")
+            .uri("/qr/000000000000000000000000000000000000000000000000")
+            .body(Body::empty())
+            .expect("request should be valid");
+        let response = app(pool)
+            .oneshot(request)
+            .await
+            .expect("the route should return a response");
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
     async fn password_change_route_requires_a_bearer_token_before_database_access() {
         let pool = PgPoolOptions::new()
             .connect_lazy("postgres://ignored:ignored@127.0.0.1:5432/ihuza")
@@ -2137,6 +2218,16 @@ mod tests {
         .execute(&pool)
         .await
         .expect("customer role fixture should be created");
+        for user_id in [&applicant_id, &outsider_id] {
+            sqlx::query(
+                "INSERT INTO user_roles (user_id, role_id)
+                 SELECT $1::uuid, id FROM roles WHERE name = 'CUSTOMER'",
+            )
+            .bind(user_id)
+            .execute(&pool)
+            .await
+            .expect("customer role fixture should be created");
+        }
         let admin_token = generate_session_token();
         let applicant_token = generate_session_token();
         let outsider_token = generate_session_token();
@@ -2163,6 +2254,33 @@ mod tests {
                     .fetch_one(&pool)
                     .await
                     .map_err(|error| error.to_string())?;
+            let pending_destination_request = Request::builder()
+                .method("GET")
+                .uri(format!("/qr/{merchant_reference}"))
+                .header("authorization", format!("Bearer {admin_token}"))
+                .body(Body::empty())
+                .map_err(|error| error.to_string())?;
+            let pending_destination_response = app(pool.clone())
+                .oneshot(pending_destination_request)
+                .await
+                .map_err(|error| error.to_string())?;
+            if pending_destination_response.status() != StatusCode::OK {
+                return Err("pending merchant QR was not resolved as a person".to_owned());
+            }
+            let pending_body = axum::body::to_bytes(
+                pending_destination_response.into_body(),
+                usize::MAX,
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+            let pending_destination: serde_json::Value =
+                serde_json::from_slice(&pending_body).map_err(|error| error.to_string())?;
+            if pending_destination["account_type"] != "PERSON_TRANSFER"
+                || pending_destination["display_name"] != "Applicant Test"
+                || pending_destination["currency"] != "RWF"
+            {
+                return Err("pending merchant QR exposed the wrong destination".to_owned());
+            }
             let pending_catalog_request = Request::builder()
                 .method("GET")
                 .uri(format!("/qr/{merchant_reference}/catalog"))
@@ -2233,6 +2351,32 @@ mod tests {
             .map_err(|error| error.to_string())?;
             if status != "APPROVED" || merchant_roles != 1 || audit_events != 1 {
                 return Err("approval status, role, or audit event was incorrect".to_owned());
+            }
+            let merchant_destination_request = Request::builder()
+                .method("GET")
+                .uri(format!("/qr/{merchant_reference}"))
+                .header("authorization", format!("Bearer {admin_token}"))
+                .body(Body::empty())
+                .map_err(|error| error.to_string())?;
+            let merchant_destination_response = app(pool.clone())
+                .oneshot(merchant_destination_request)
+                .await
+                .map_err(|error| error.to_string())?;
+            if merchant_destination_response.status() != StatusCode::OK {
+                return Err("approved merchant QR was not resolved".to_owned());
+            }
+            let merchant_body = axum::body::to_bytes(
+                merchant_destination_response.into_body(),
+                usize::MAX,
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+            let merchant_destination: serde_json::Value =
+                serde_json::from_slice(&merchant_body).map_err(|error| error.to_string())?;
+            if merchant_destination["account_type"] != "MERCHANT_CHECKOUT"
+                || merchant_destination["display_name"] != "Approval Test Shop"
+            {
+                return Err("approved merchant QR exposed the wrong destination".to_owned());
             }
 
             let product_request = Request::builder()
@@ -2574,6 +2718,45 @@ mod tests {
                     .fetch_one(&pool)
                     .await
                     .map_err(|error| error.to_string())?;
+            let ordinary_destination_request = Request::builder()
+                .method("GET")
+                .uri(format!("/qr/{ordinary_reference}"))
+                .header("authorization", format!("Bearer {outsider_token}"))
+                .body(Body::empty())
+                .map_err(|error| error.to_string())?;
+            let ordinary_destination_response = app(pool.clone())
+                .oneshot(ordinary_destination_request)
+                .await
+                .map_err(|error| error.to_string())?;
+            if ordinary_destination_response.status() != StatusCode::OK {
+                return Err("customer QR was not resolved for another customer".to_owned());
+            }
+            let ordinary_body = axum::body::to_bytes(
+                ordinary_destination_response.into_body(),
+                usize::MAX,
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+            let ordinary_destination: serde_json::Value =
+                serde_json::from_slice(&ordinary_body).map_err(|error| error.to_string())?;
+            if ordinary_destination["account_type"] != "PERSON_TRANSFER"
+                || ordinary_destination["display_name"] != "Admin Test"
+            {
+                return Err("customer QR exposed the wrong destination".to_owned());
+            }
+            let self_destination_request = Request::builder()
+                .method("GET")
+                .uri(format!("/qr/{ordinary_reference}"))
+                .header("authorization", format!("Bearer {admin_token}"))
+                .body(Body::empty())
+                .map_err(|error| error.to_string())?;
+            let self_destination_response = app(pool.clone())
+                .oneshot(self_destination_request)
+                .await
+                .map_err(|error| error.to_string())?;
+            if self_destination_response.status() != StatusCode::BAD_REQUEST {
+                return Err("customer could use their own QR as a destination".to_owned());
+            }
             let ordinary_catalog_request = Request::builder()
                 .method("GET")
                 .uri(format!("/qr/{ordinary_reference}/catalog"))

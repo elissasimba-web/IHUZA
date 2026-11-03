@@ -13,6 +13,7 @@ Status: test-only ledger prototype installed on 2026-11-03. The intended product
 ## What exists now
 
 - Customer checkout creates a server-priced `PENDING` Smart Invoice with item snapshots and an idempotency key.
+- Authenticated `GET /qr/{reference}` resolves the one account QR as an approved merchant checkout destination or an ordinary person transfer destination. It returns a display name and RWF, not a balance or permission to debit; it rejects self-scans. No person-to-person transfer endpoint exists yet.
 - Invoice list and detail are scoped to the customer and merchant owner.
 - The applied `transactions` migration has amount, currency, payment method/reference, and status, but no API writes to it yet.
 - `test_ledger_*` tables and `test_ledger_transfer` provide an isolated RWF test ledger with paired postings, a posted-balance view, key-based retries, and overspend checks for test users. No API invokes it; no production ledger exists.
