@@ -21,6 +21,16 @@ Status: an isolated test ledger and a dormant production wallet-ledger schema fo
 - The HTTP backend now requires `APP_DATABASE_URL` for a limited PostgreSQL role. A separate owner `DATABASE_URL` remains for SQLx migrations and the local admin bootstrap. The runtime role cannot write wallet ledger batches or entries; startup rejects a privileged role. See `docs/DATABASE_ROLES.md`.
 - There is no funding rail, provider callback verification, reconciliation process, or Receipt Vault record of a verified payment.
 
+## Review of the wallet and QR implementation brief (2026-11-03)
+
+The implementation brief agrees with the existing backend on an account-owned RWF wallet, immutable balanced ledger postings, idempotency, server validation, and online payment confirmation. Its stages 1 and 2 are only partly complete: the schema, derived balance, zero-value provisioning, and owner-scoped wallet read exist, but no verified funding, spendable value, wallet history API, or active money operation exists. Stages 3 through 7 are not complete. The existing `transactions` table is not a verified payment service.
+
+The brief's **dynamic payment QR** would introduce a second QR containing a payment-request reference. That conflicts with the agreed one persistent account QR per IHUZA+ account. Keep the single account QR as the scan entry point. A merchant payment request or Smart Invoice may have an opaque server-side reference, expiry, cancellation state, and single-use rules, but must not require another QR. The first merchant checkout uses the merchant's approved catalog and server-calculated item total; a customer-entered amount belongs only to a separately defined payment flow, not an override of a catalog invoice.
+
+Do not interpret “wallet activation” as permission to accept funds: `ACTIVE` currently means that a zero-value account record can be used once a verified money service is built and enabled. `money_operations_enabled` remains false. “Available balance” cannot be promised until holds, pending transfers, and release rules are defined; the current `balance` is a ledger-derived posted balance only. The brief's request for a successful internal payment depends on a verified, safeguarded source of initial RWF value and a reviewed posting authority. Test fixtures cannot be used to claim a real successful payment.
+
+The next implementation step is a payer-owned, idempotent **pending transfer/payment intent** linked to the scanned destination and optionally to an existing Smart Invoice. Creation must validate recipient role and invoice ownership, currency, positive amount, request hash, and retry behavior; it must neither debit, credit, mark an invoice paid, nor issue a receipt. After database access returns, add and apply a corrective migration for this intent and its state rules, then build and test the authenticated API. The later posting step must commit the ledger batch, final payment state, and receipt linkage atomically through a narrowly permitted operation, with concurrency and failure tests. Real funding and transfers remain disabled until safeguarding and reconciliation are established.
+
 ## Gaps in the applied schema
 
 - `transactions.payment_reference` is nullable and is not an idempotency key for a customer's request. It cannot prevent two payment attempts for the same checkout.
