@@ -1,19 +1,13 @@
-[package]
-name = "backend"
-version = "0.1.0"
-edition = "2024"
-default-run = "backend"
+[workspace]
+resolver = "2"
+members = ["contracts/intent_anchor"]
 
-[dependencies]
-argon2 = "0.5.3"
-axum = "0.8.9"
-base64 = "0.22.1"
-dotenvy = "0.15.7"
-qrcodegen = "1.8.0"
-rand_core = { version = "0.6.4", features = ["getrandom"] }
-serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "=1.0.146"
-sha2 = "0.10.9"
-sqlx = { version = "0.9.0", features = ["runtime-tokio", "tls-native-tls", "postgres"] }
-tokio = { version = "1.53.1", features = ["full"] }
-tower = { version = "0.5.3", features = ["util"] }
+[profile.release]
+opt-level = "z"
+overflow-checks = true
+debug = 0
+strip = "symbols"
+debug-assertions = false
+panic = "abort"
+codegen-units = 1
+lto = true

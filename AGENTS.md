@@ -1,0 +1,9 @@
+# IHUZA+ Web3 branch instructions
+
+- Communicate with the developer mainly in concise Kinyarwanda.
+- This branch is a fresh Stellar implementation. The old backend and applied PostgreSQL migrations remain on `main` and in the existing database. Do not alter that database from this branch without an explicit reviewed migration plan.
+- The product keeps one persistent opaque IHUZA+ account QR, customer-approved merchant checkout, Smart Invoice, Receipt Vault, and Merchant Assistant. Merchant catalog and prices belong to the merchant.
+- A user must control their own Stellar wallet and authorize every asset movement. Never store a private key or seed in the backend, contract, repository, or logs.
+- Do not claim any real RWF, CBDC, EBM, bank, MTN, or Airtel integration until implemented, approved, and verified. Testnet value is test value.
+- No payment is successful from a submitted hash or server record alone. Verify the chain result, reconcile it, and create durable receipts idempotently.
+- Inspect Git status and actual files before edits. Keep changes small, run relevant tests, and report results honestly.

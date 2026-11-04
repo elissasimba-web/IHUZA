@@ -2,6 +2,8 @@
 
 Status: whole-platform target architecture and implementation plan, 2026-11-04. This document does not enable real-money operations or claim a deployed Stellar integration.
 
+**Branch note (2026-11-04):** The inventory and transition steps below describe the earlier `main` backend, retained in Git history and its existing database. The `web3-rebuild` branch starts a new implementation and does not contain that backend or its SQL migrations. Treat the tables below as product requirements and historical analysis, not as a claim that those routes or tables exist in this branch. The only new contract code here is the test-only intent anchor; it does not settle payments.
+
 ## Product decision
 
 IHUZA+ will be built as a Stellar-based Web3 application across its customer, merchant, payment, record, and service flows. A customer must authorize any on-chain movement from their own wallet. Soroban is the smart-contract platform; contracts are written in Rust, not Solidity. The existing Rust/Axum/PostgreSQL backend remains the application, privacy, identity, catalog, and indexing layer. Public-chain storage is selected by verifiability and consent requirements, not by the label "Web3".
