@@ -238,6 +238,25 @@ struct TransferIntentResponse {
     money_moved: bool,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CreateInvoiceIntentRequest {
+    invoice_id: String,
+    idempotency_key: String,
+}
+
+#[derive(Debug, Serialize)]
+struct InvoiceIntentResponse {
+    id: String,
+    invoice_id: String,
+    invoice_number: String,
+    merchant_name: String,
+    amount: String,
+    currency: String,
+    status: String,
+    money_moved: bool,
+}
+
 #[derive(Debug)]
 struct NewRegistration {
     phone_number: String,
@@ -331,6 +350,7 @@ fn app(pool: PgPool) -> Router {
         .route("/account/qr-reference", get(account_qr_reference))
         .route("/wallet", post(open_wallet).get(get_wallet))
         .route("/wallet/transfer-intents", post(create_transfer_intent))
+        .route("/wallet/invoice-intents", post(create_invoice_intent))
         .route("/auth/password", patch(change_password))
         .route("/merchants/apply", post(apply_for_merchant))
         .route(
@@ -786,6 +806,168 @@ async fn create_transfer_intent(
             money_moved: false,
         }),
     ))
+}
+
+async fn create_invoice_intent(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<CreateInvoiceIntentRequest>,
+) -> Result<(StatusCode, Json<InvoiceIntentResponse>), ApiError> {
+    let customer_id = require_customer(&state.pool, &headers).await?;
+    let key = request.idempotency_key.trim();
+    if !(16..=128).contains(&key.len())
+        || !key
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+    {
+        return Err(ApiError::bad_request("Invalid idempotency key"));
+    }
+    let invoice_id = request.invoice_id.trim().to_ascii_lowercase();
+    if !valid_uuid_text(&invoice_id) {
+        return Err(ApiError::bad_request("Invalid invoice ID"));
+    }
+    let mut tx = state.pool.begin().await.map_err(|_| ApiError::internal())?;
+    let result = create_invoice_intent_in_tx(&mut tx, &customer_id, &invoice_id, key).await?;
+    tx.commit().await.map_err(|_| ApiError::internal())?;
+    Ok((result.0, Json(result.1)))
+}
+
+async fn create_invoice_intent_in_tx(
+    connection: &mut PgConnection,
+    customer_id: &str,
+    invoice_id: &str,
+    key: &str,
+) -> Result<(StatusCode, InvoiceIntentResponse), ApiError> {
+    let request_hash = format!(
+        "{:x}",
+        Sha256::digest(format!("merchant-invoice:v1:{invoice_id}").as_bytes())
+    );
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+        .bind(format!("transfer-intent:{customer_id}:{key}"))
+        .execute(&mut *connection)
+        .await
+        .map_err(|_| ApiError::internal())?;
+    let existing = sqlx::query_as::<
+        _,
+        (
+            String,
+            String,
+            String,
+            String,
+            String,
+            String,
+            Option<String>,
+            Option<String>,
+        ),
+    >(
+        "SELECT t.id::text, t.amount::text, btrim(t.currency), t.status,
+                t.request_hash, t.intent_kind, i.invoice_number, m.business_name
+         FROM wallet_transfer_intents t
+         LEFT JOIN invoices i ON i.id = t.invoice_id
+         LEFT JOIN merchant_profiles m ON m.id = i.merchant_id
+         WHERE t.sender_user_id = $1::uuid AND t.request_key = $2",
+    )
+    .bind(customer_id)
+    .bind(key)
+    .fetch_optional(&mut *connection)
+    .await
+    .map_err(|_| ApiError::internal())?;
+    if let Some((id, amount, currency, status, stored_hash, kind, number, merchant)) = existing {
+        if stored_hash != request_hash || kind != "MERCHANT_INVOICE" {
+            return Err(ApiError::conflict(
+                "Idempotency key was used for another transfer intent",
+            ));
+        }
+        return Ok((
+            StatusCode::OK,
+            InvoiceIntentResponse {
+                id,
+                invoice_id: invoice_id.to_owned(),
+                invoice_number: number.ok_or_else(ApiError::internal)?,
+                merchant_name: merchant.ok_or_else(ApiError::internal)?,
+                amount,
+                currency,
+                status,
+                money_moved: false,
+            },
+        ));
+    }
+
+    let sender_wallet_active: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM wallet_accounts
+         WHERE user_id = $1::uuid AND status = 'ACTIVE')",
+    )
+    .bind(customer_id)
+    .fetch_one(&mut *connection)
+    .await
+    .map_err(|_| ApiError::internal())?;
+    if !sender_wallet_active {
+        return Err(ApiError::conflict("Open an active wallet first"));
+    }
+    let invoice = sqlx::query_as::<_, (String, String, String, String)>(
+        "SELECT i.total_amount::text, i.invoice_number,
+                m.user_id::text, m.business_name
+         FROM invoices i
+         JOIN merchant_profiles m ON m.id = i.merchant_id
+         JOIN users u ON u.id = m.user_id AND u.is_active = TRUE
+         WHERE i.id = $1::uuid AND i.customer_id = $2::uuid
+           AND i.payment_status = 'PENDING' AND i.total_amount > 0
+           AND btrim(i.currency) = 'RWF' AND m.status = 'APPROVED'
+           AND m.user_id <> i.customer_id
+           AND EXISTS (SELECT 1 FROM invoice_items item WHERE item.invoice_id = i.id)
+           AND EXISTS (SELECT 1 FROM user_roles ur JOIN roles r ON r.id = ur.role_id
+                       WHERE ur.user_id = m.user_id AND r.name = 'MERCHANT')",
+    )
+    .bind(invoice_id)
+    .bind(customer_id)
+    .fetch_optional(&mut *connection)
+    .await
+    .map_err(|_| ApiError::internal())?
+    .ok_or_else(|| ApiError::not_found("Payable invoice was not found"))?;
+    let (amount, invoice_number, merchant_user_id, merchant_name) = invoice;
+    let inserted = sqlx::query_as::<_, (String, String, String, String)>(
+        "INSERT INTO wallet_transfer_intents
+         (sender_user_id, recipient_user_id, invoice_id, intent_kind,
+          amount, request_key, request_hash)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, 'MERCHANT_INVOICE',
+                 $4::numeric, $5, $6)
+         ON CONFLICT DO NOTHING
+         RETURNING id::text, amount::text, btrim(currency), status",
+    )
+    .bind(customer_id)
+    .bind(&merchant_user_id)
+    .bind(invoice_id)
+    .bind(&amount)
+    .bind(key)
+    .bind(&request_hash)
+    .fetch_optional(&mut *connection)
+    .await
+    .map_err(|_| ApiError::internal())?
+    .ok_or_else(|| ApiError::conflict("Invoice already has a payment intent"))?;
+    Ok((
+        StatusCode::CREATED,
+        InvoiceIntentResponse {
+            id: inserted.0,
+            invoice_id: invoice_id.to_owned(),
+            invoice_number,
+            merchant_name,
+            amount: inserted.1,
+            currency: inserted.2,
+            status: inserted.3,
+            money_moved: false,
+        },
+    ))
+}
+
+fn valid_uuid_text(value: &str) -> bool {
+    value.len() == 36
+        && value.bytes().enumerate().all(|(index, byte)| {
+            if [8, 13, 18, 23].contains(&index) {
+                byte == b'-'
+            } else {
+                byte.is_ascii_hexdigit()
+            }
+        })
 }
 
 async fn approved_merchant_from_reference(
@@ -2327,6 +2509,146 @@ mod tests {
             .await
             .expect("route should respond");
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn invoice_intent_requires_a_bearer_token() {
+        let pool = PgPoolOptions::new()
+            .connect_lazy("postgres://ignored:ignored@127.0.0.1:5432/ihuza")
+            .expect("a lazy test pool should be valid");
+        let request = Request::builder()
+            .method("POST")
+            .uri("/wallet/invoice-intents")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"invoice_id":"00000000-0000-0000-0000-000000000000","idempotency_key":"test-invoice-intent-123"}"#))
+            .expect("request should be valid");
+        let response = app(pool)
+            .oneshot(request)
+            .await
+            .expect("route should respond");
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    #[ignore = "requires APP_DATABASE_URL; invoice fixtures are rolled back"]
+    async fn invoice_intent_uses_server_total_and_is_idempotent() {
+        dotenvy::dotenv().ok();
+        let database_url = env::var("APP_DATABASE_URL").expect("APP_DATABASE_URL must be set");
+        let pool = PgPoolOptions::new()
+            .max_connections(2)
+            .connect(&database_url)
+            .await
+            .expect("runtime role should connect");
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be after epoch")
+            .as_nanos();
+        let mut tx = pool.begin().await.expect("test transaction should begin");
+        let customer_id: String = sqlx::query_scalar(
+            "INSERT INTO users (phone_number, password_hash, first_name)
+             VALUES ($1, 'invoice-intent-test-hash', 'Buyer') RETURNING id::text",
+        )
+        .bind(format!("invoice-intent-buyer-{suffix}"))
+        .fetch_one(&mut *tx)
+        .await
+        .expect("buyer should be created");
+        let merchant_user_id: String = sqlx::query_scalar(
+            "INSERT INTO users (phone_number, password_hash, first_name)
+             VALUES ($1, 'invoice-intent-test-hash', 'Seller') RETURNING id::text",
+        )
+        .bind(format!("invoice-intent-seller-{suffix}"))
+        .fetch_one(&mut *tx)
+        .await
+        .expect("seller should be created");
+        for (user_id, role_name) in [
+            (&customer_id, "CUSTOMER"),
+            (&merchant_user_id, "CUSTOMER"),
+            (&merchant_user_id, "MERCHANT"),
+        ] {
+            sqlx::query(
+                "INSERT INTO user_roles (user_id, role_id)
+                 SELECT $1::uuid, id FROM roles WHERE name = $2",
+            )
+            .bind(user_id)
+            .bind(role_name)
+            .execute(&mut *tx)
+            .await
+            .expect("test role should be granted");
+        }
+        let merchant_id: String = sqlx::query_scalar(
+            "INSERT INTO merchant_profiles (user_id, business_name, status)
+             VALUES ($1::uuid, 'Test Shop', 'APPROVED') RETURNING id::text",
+        )
+        .bind(&merchant_user_id)
+        .fetch_one(&mut *tx)
+        .await
+        .expect("approved merchant should be created");
+        sqlx::query("INSERT INTO wallet_accounts (user_id) VALUES ($1::uuid)")
+            .bind(&customer_id)
+            .execute(&mut *tx)
+            .await
+            .expect("buyer wallet should open at zero");
+        sqlx::query("INSERT INTO wallet_accounts (user_id) VALUES ($1::uuid)")
+            .bind(&merchant_user_id)
+            .execute(&mut *tx)
+            .await
+            .expect("seller wallet should open at zero");
+        let invoice_id: String = sqlx::query_scalar(
+            "INSERT INTO invoices (merchant_id, customer_id, invoice_number, subtotal, total_amount)
+             VALUES ($1::uuid, $2::uuid, $3, 15.00, 15.00) RETURNING id::text",
+        ).bind(&merchant_id).bind(&customer_id).bind(format!("TEST-{suffix}"))
+            .fetch_one(&mut *tx).await.expect("invoice should be created");
+        sqlx::query(
+            "INSERT INTO invoice_items (invoice_id, product_name, quantity, unit_price, subtotal)
+             VALUES ($1::uuid, 'Rice', 1, 15.00, 15.00)",
+        )
+        .bind(&invoice_id)
+        .execute(&mut *tx)
+        .await
+        .expect("invoice snapshot should be created");
+
+        let key = format!("invoice-intent-{suffix}");
+        let (first_status, first) =
+            create_invoice_intent_in_tx(&mut tx, &customer_id, &invoice_id, &key)
+                .await
+                .expect("buyer should create an invoice intent");
+        assert_eq!(first_status, StatusCode::CREATED);
+        assert_eq!(first.amount, "15.00");
+        assert_eq!(first.merchant_name, "Test Shop");
+        assert_eq!(first.status, "DRAFT");
+        assert!(!first.money_moved);
+        let (retry_status, retry) =
+            create_invoice_intent_in_tx(&mut tx, &customer_id, &invoice_id, &key)
+                .await
+                .expect("same key should return the same draft");
+        assert_eq!(retry_status, StatusCode::OK);
+        assert_eq!(retry.id, first.id);
+        let another_key = format!("invoice-again-{suffix}");
+        let duplicate =
+            create_invoice_intent_in_tx(&mut tx, &customer_id, &invoice_id, &another_key)
+                .await
+                .expect_err("another draft for the invoice must be rejected");
+        assert_eq!(duplicate.status, StatusCode::CONFLICT);
+        let unauthorized = create_invoice_intent_in_tx(
+            &mut tx,
+            &merchant_user_id,
+            &invoice_id,
+            &format!("wrong-owner-{suffix}"),
+        )
+        .await
+        .expect_err("another account cannot prepare this invoice");
+        assert_eq!(unauthorized.status, StatusCode::NOT_FOUND);
+        let (invoice_status, wallet_balance): (String, String) = sqlx::query_as(
+            "SELECT i.payment_status, b.balance::text FROM invoices i
+             JOIN wallet_balances b ON b.user_id = i.customer_id WHERE i.id = $1::uuid",
+        )
+        .bind(&invoice_id)
+        .fetch_one(&mut *tx)
+        .await
+        .expect("invoice and wallet should be readable");
+        assert_eq!(invoice_status, "PENDING");
+        assert_eq!(wallet_balance, "0.00");
+        tx.rollback().await.expect("fixtures should roll back");
     }
 
     #[tokio::test]
