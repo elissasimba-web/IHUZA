@@ -9,6 +9,7 @@ IHUZA+ ni umushinga wa serivisi z'imari n'iz'ubucuruzi ugenewe u Rwanda. Ubu iyi
 - Rust workspace irimo Soroban `intent_anchor` contract. Nyiri aderesi ya Stellar agomba kwemeza intent hash; contract igenzura igihe ntarengwa kandi ikumira gusubiramo iyo hash ikiri mu bubiko. Nta mafaranga iyi contract yimura.
 - `cargo test --locked --offline` yatsinze; `stellar contract build` yatanze Wasm. Nta contract yashyizwe kuri testnet cyangwa mainnet.
 - `scripts/check_stellar_testnet.ps1` ni read-only network probe; ntabwo ari payment integration.
+- `web/` ifite frontend ihuza Freighter wallet kandi ikemeza ko iri kuri Stellar testnet. Yerekana public address gusa; nta transaction ikora kandi nta konti ya IHUZA+ ihuzwa na wallet kugeza ubu.
 
 ## Ibyo project izubaka
 
@@ -25,6 +26,12 @@ Ibisabwa: Rust, `wasm32v1-none` target, na Stellar CLI ihuye na Soroban SDK v26.
 ```powershell
 cargo test --locked
 stellar contract build
+cd web
+npm ci
+npm test
+npm run dev
 ```
+
+Fungura `http://127.0.0.1:5173` muri browser ifite Freighter extension, uyishyire kuri testnet, hanyuma ukande **Huza Freighter**. Kuri browser itagira Freighter, UI yerekana icyo kubura; ntihimba wallet. `npm run build` igenzura production bundle.
 
 Nta mabanga ya wallet ashyirwa muri iyi repository. Nta RWF token, CBDC, EBM, bank, MTN cyangwa Airtel integration irimo. Iyimurika rigomba kwerekana prototype nk'uko iri, rikavuga neza ko ubwishyu nyabwo na Receipt Vault bitarubakwa.

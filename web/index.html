@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="rw">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#071a25" />
+    <meta name="description" content="IHUZA+ Stellar testnet wallet connection prototype" />
+    <title>IHUZA+ | Wallet yawe, uburenganzira bwawe</title>
+  </head>
+  <body>
+    <div id="app">
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="IHUZA+ ahabanza"><span class="brand-mark">I<span>+</span></span><span>IHUZA<span class="brand-plus">+</span></span></a>
+        <span class="environment"><span class="environment-dot"></span> Stellar testnet gusa</span>
+      </header>
+
+      <main>
+        <section class="hero" aria-labelledby="hero-title">
+          <div class="hero-copy">
+            <p class="eyebrow">ONE ACCOUNT. EVERY SERVICE.</p>
+            <h1 id="hero-title">Wallet yawe.<br /><span>Uburenganzira bwawe.</span></h1>
+            <p class="hero-description">IHUZA+ yubakwa kugira ngo konti imwe izahuze kwishyurana, ubucuruzi n'inyandiko zawe. Ubu turatangirira ku guhuza wallet ya Stellar igenzurwa nawe.</p>
+            <div class="hero-points"><span>● Nta private key tubika</span><span>● Nta mafaranga nyayo</span><span>● Online gusa</span></div>
+          </div>
+          <div class="hero-art" aria-hidden="true"><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><div class="core-symbol">I<span>+</span></div><div class="art-label art-label-top">YOU CONTROL THE KEY</div><div class="art-label art-label-bottom">STELLAR TESTNET</div></div>
+        </section>
+
+        <section class="wallet-section" aria-labelledby="wallet-title">
+          <div class="section-heading"><div><p class="eyebrow">INTAMBWE YA MBERE</p><h2 id="wallet-title">Huza wallet yawe</h2></div><p>Freighter extension ni yo isaba uburenganzira bwawe. IHUZA+ ibona aderesi rusange gusa.</p></div>
+          <div class="wallet-card">
+            <div class="wallet-card-top"><div class="wallet-icon" aria-hidden="true">✦</div><div><span class="card-kicker">WALLET CONNECTION</span><h3>Freighter</h3></div><span id="status-badge" class="status-badge">Biragenzurwa</span></div>
+            <p id="wallet-message" class="wallet-message" role="status" aria-live="polite">Turagenzura niba Freighter iboneka muri iyi browser...</p>
+            <div id="wallet-details" class="wallet-details" hidden><div><span>Aderesi rusange</span><code id="wallet-address"></code></div><div><span>Network</span><strong id="wallet-network"></strong></div></div>
+            <div class="wallet-actions"><button id="connect-button" class="button button-primary" type="button">Huza Freighter <span aria-hidden="true">↗</span></button><button id="refresh-button" class="button button-secondary" type="button">Ongera ugenzure</button></div>
+            <p class="fine-print">Niba Freighter itari muri browser, <a href="https://freighter.app/" target="_blank" rel="noopener noreferrer">yikure ku rubuga rwayo</a>. Guhuza wallet ntibikora transaction, ntibishyura kandi ntibihuza aderesi yawe na konti ya IHUZA+ kugeza uburyo bwo kwemeza ownership bwubatswe.</p>
+          </div>
+        </section>
+
+        <section class="roadmap" aria-labelledby="roadmap-title"><div class="section-heading"><div><p class="eyebrow">AHO TUGANA</p><h2 id="roadmap-title">Konti imwe, serivisi nyinshi</h2></div><p>Ibi bikurikira biri mu cyerekezo cya product; ntibirakora muri iyi prototype.</p></div><div class="roadmap-grid"><article><span class="step-number">01</span><h3>QR imwe</h3><p>Scan ya konti izafungura uburyo bwo kwishyurana bukwiranye n'umukiriya cyangwa umucuruzi wemewe.</p></article><article><span class="step-number">02</span><h3>Smart Invoice</h3><p>Umucuruzi azagena ibiciro; umukiriya ahitemo ibicuruzwa, server ibare total mbere yo kwemeza.</p></article><article><span class="step-number">03</span><h3>Receipt Vault</h3><p>Inyemezabwishyu zizabikwa nyuma y'ubwishyu bwagenzuwe, zikabonwa n'impande zombi.</p></article></div></section>
+      </main>
+      <footer><span>IHUZA Digital ELI Technologies Ltd</span><span>Prototype · Stellar testnet · Nta mafaranga nyayo</span></footer>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

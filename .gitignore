@@ -3,3 +3,5 @@
 .env.*
 !.env.example
 **/test_snapshots/
+/web/node_modules/
+/web/dist/

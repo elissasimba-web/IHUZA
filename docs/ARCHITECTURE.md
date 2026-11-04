@@ -2,7 +2,7 @@
 
 ## Aho tugeze
 
-Iri shami rifite Soroban `intent_anchor` contract na read-only testnet probe gusa. Nta frontend, API, database schema nshya, wallet connection, QR resolver, chain indexer, payment cyangwa Receipt Vault birimo. Mu iyimurika bigomba kuvugwa uko biri.
+Iri shami rifite Soroban `intent_anchor` contract, read-only testnet probe, na frontend ihuza Freighter wallet kuri testnet ikerekana public address. Nta API, database schema nshya, account ownership proof, QR resolver, chain indexer, payment cyangwa Receipt Vault birimo. Mu iyimurika bigomba kuvugwa uko biri.
 
 Iyi prototype ntikoresha PostgreSQL kugeza ubu. Hazakenerwa database nshya y'amakuru ya off-chain, yubatse ku bisabwa n'iyi architecture; ntituzafata records za database ya kera nk'aho ari amafaranga ya Stellar.
 
