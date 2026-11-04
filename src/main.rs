@@ -222,6 +222,22 @@ struct WalletSummaryResponse {
     money_operations_enabled: bool,
 }
 
+#[derive(Deserialize)]
+struct CreateTransferIntentRequest {
+    recipient_qr_reference: String,
+    amount: String,
+    idempotency_key: String,
+}
+
+#[derive(Serialize)]
+struct TransferIntentResponse {
+    id: String,
+    amount: String,
+    currency: String,
+    status: String,
+    money_moved: bool,
+}
+
 #[derive(Debug)]
 struct NewRegistration {
     phone_number: String,
@@ -314,6 +330,7 @@ fn app(pool: PgPool) -> Router {
         .route("/auth/me", get(current_user))
         .route("/account/qr-reference", get(account_qr_reference))
         .route("/wallet", post(open_wallet).get(get_wallet))
+        .route("/wallet/transfer-intents", post(create_transfer_intent))
         .route("/auth/password", patch(change_password))
         .route("/merchants/apply", post(apply_for_merchant))
         .route(
@@ -649,6 +666,126 @@ async fn get_wallet(
         .await
         .map_err(|_| ApiError::internal())?;
     Ok(Json(wallet_summary(&mut connection, &user_id).await?))
+}
+
+async fn create_transfer_intent(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<CreateTransferIntentRequest>,
+) -> Result<(StatusCode, Json<TransferIntentResponse>), ApiError> {
+    let sender_id = require_customer(&state.pool, &headers).await?;
+    let key = request.idempotency_key.trim();
+    if !(16..=128).contains(&key.len())
+        || !key
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+    {
+        return Err(ApiError::bad_request("Invalid idempotency key"));
+    }
+    let reference = request.recipient_qr_reference.trim();
+    if reference.len() != 48 || !reference.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(ApiError::bad_request("Invalid account QR reference"));
+    }
+    let cents = parse_decimal_units(request.amount.trim(), 18, 2)
+        .filter(|value| *value > 0)
+        .ok_or_else(|| ApiError::bad_request("Invalid transfer amount"))?;
+    let amount = format_money(cents);
+    let request_hash = format!(
+        "{:x}",
+        Sha256::digest(format!("person-transfer:v1:{reference}:{amount}").as_bytes())
+    );
+
+    let mut tx = state.pool.begin().await.map_err(|_| ApiError::internal())?;
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+        .bind(format!("transfer-intent:{sender_id}:{key}"))
+        .execute(&mut *tx)
+        .await
+        .map_err(|_| ApiError::internal())?;
+    let existing = sqlx::query_as::<_, (String, String, String, String, String)>(
+        "SELECT id::text, amount::text, btrim(currency), status, request_hash
+         FROM wallet_transfer_intents
+         WHERE sender_user_id = $1::uuid AND request_key = $2",
+    )
+    .bind(&sender_id)
+    .bind(key)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|_| ApiError::internal())?;
+    if let Some((id, amount, currency, status, stored_hash)) = existing {
+        if stored_hash != request_hash {
+            return Err(ApiError::conflict(
+                "Idempotency key was used for another transfer intent",
+            ));
+        }
+        tx.commit().await.map_err(|_| ApiError::internal())?;
+        return Ok((
+            StatusCode::OK,
+            Json(TransferIntentResponse {
+                id,
+                amount,
+                currency,
+                status,
+                money_moved: false,
+            }),
+        ));
+    }
+
+    let sender_wallet_active: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM wallet_accounts
+         WHERE user_id = $1::uuid AND status = 'ACTIVE')",
+    )
+    .bind(&sender_id)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|_| ApiError::internal())?;
+    if !sender_wallet_active {
+        return Err(ApiError::conflict("Open an active wallet first"));
+    }
+    let recipient_id: String = sqlx::query_scalar(
+        "SELECT u.id::text FROM users u
+         WHERE u.account_qr_reference = $1 AND u.is_active = TRUE
+           AND EXISTS (SELECT 1 FROM user_roles ur JOIN roles r ON r.id = ur.role_id
+                       WHERE ur.user_id = u.id AND r.name = 'CUSTOMER')
+           AND NOT EXISTS (
+               SELECT 1 FROM merchant_profiles m JOIN user_roles ur ON ur.user_id = u.id
+               JOIN roles r ON r.id = ur.role_id AND r.name = 'MERCHANT'
+               WHERE m.user_id = u.id AND m.status = 'APPROVED')",
+    )
+    .bind(reference)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|_| ApiError::internal())?
+    .ok_or_else(|| ApiError::not_found("Person transfer destination was not found"))?;
+    if recipient_id == sender_id {
+        return Err(ApiError::bad_request(
+            "Your own QR is not a transfer destination",
+        ));
+    }
+    let (id, amount, currency, status) = sqlx::query_as::<_, (String, String, String, String)>(
+        "INSERT INTO wallet_transfer_intents
+         (sender_user_id, recipient_user_id, amount, request_key, request_hash)
+         VALUES ($1::uuid, $2::uuid, $3::numeric, $4, $5)
+         RETURNING id::text, amount::text, btrim(currency), status",
+    )
+    .bind(&sender_id)
+    .bind(&recipient_id)
+    .bind(&amount)
+    .bind(key)
+    .bind(&request_hash)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|_| ApiError::internal())?;
+    tx.commit().await.map_err(|_| ApiError::internal())?;
+    Ok((
+        StatusCode::CREATED,
+        Json(TransferIntentResponse {
+            id,
+            amount,
+            currency,
+            status,
+            money_moved: false,
+        }),
+    ))
 }
 
 async fn approved_merchant_from_reference(
@@ -2172,6 +2309,24 @@ mod tests {
                 .expect("the route should return a response");
             assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
         }
+    }
+
+    #[tokio::test]
+    async fn transfer_intent_requires_a_bearer_token() {
+        let pool = PgPoolOptions::new()
+            .connect_lazy("postgres://ignored:ignored@127.0.0.1:5432/ihuza")
+            .expect("a lazy test pool should be valid");
+        let request = Request::builder()
+            .method("POST")
+            .uri("/wallet/transfer-intents")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"recipient_qr_reference":"000000000000000000000000000000000000000000000000","amount":"1.00","idempotency_key":"test-transfer-1234"}"#))
+            .expect("request should be valid");
+        let response = app(pool)
+            .oneshot(request)
+            .await
+            .expect("route should respond");
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]
