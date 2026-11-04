@@ -11,8 +11,26 @@ The existing single persistent opaque account QR stays the entry point. The serv
 ## What exists and what does not
 
 - Existing: IHUZA+ identity and sessions, merchant approval and catalog, server-priced pending Smart Invoices with snapshots, one account QR, zero-value RWF wallet accounts, append-only balanced wallet-ledger schema, and draft person/invoice transfer intents.
+- Existing read-only Stellar check: `scripts/check_stellar_testnet.ps1` calls RPC `getNetwork` and rejects a response outside the official testnet passphrase. It has no wallet or payment capability.
 - Missing: Stellar address binding, proof of wallet ownership, user-side signing, Soroban contracts, Stellar RPC adapter and event indexer, on-chain asset selection, verified on-chain payment state, customer/merchant receipts, and reconciliation.
 - The current `wallet_accounts` and `wallet_balances` represent an internal RWF accounting foundation. They are not self-custody Stellar wallets. `DRAFT` intents move no value. No real RWF, CBDC, bank, mobile-money, or EBM integration is operational.
+
+## Root-by-root transition inventory
+
+This table is based on the current routes, Cargo dependencies, and installed SQLx migrations. It is a change order, not permission to erase financial history.
+
+| Existing component | Web3 action | Reason / exit condition |
+| --- | --- | --- |
+| Rust/Axum API, PostgreSQL, login, roles, audit | Keep and harden | They protect private data and authorize app access; wallet spending additionally requires the user's Stellar signature. |
+| One opaque account QR and role-gated resolver | Keep; bind to verified Stellar destination | The QR remains stable while the server validates the current recipient and checkout. No address or secret is embedded in the QR. |
+| Merchant catalog, procurement, Smart Invoice snapshots | Keep; connect to verified chain results | Product prices and private purchase details are application data. A pending invoice is not a payment. |
+| `POST/GET /wallet` and `wallet_accounts`/`wallet_balances` | Replace in the user experience with a verified Stellar wallet connection and chain-derived asset view; retain existing schema until references and data are audited | The current wallet is a zero-value internal RWF ledger, not a user-controlled chain wallet. Do not present both as one spendable balance. |
+| `wallet_transfer_intents` and its draft routes | Evolve into chain-aware intents with network, asset, payer/recipient addresses, expiry, signed payload, and chain result | Existing drafts are server-side preparations with no movement. Migrate by additive schema and verified state transitions. |
+| `wallet_ledger_*` and isolated `test_ledger_*` | Keep dormant during transition; evaluate archival or retirement only after the chain accounting and any real RWF obligations are settled | Installed migrations and financial records must not be deleted or rewritten. The runtime role currently cannot post ledger entries. |
+| `transactions`, invoice payment status, future receipts | Make verified chain settlement the source of any on-chain payment-success claim; add durable receipt linkage | A submitted transaction hash, notification, or database row cannot prove a completed transfer. |
+| Read-only Stellar testnet RPC probe, but no Stellar app/Soroban implementation | Add wallet ownership proof, signing, adapter, event indexer, tests, and only necessary contracts | `scripts/check_stellar_testnet.ps1` verifies `getNetwork` and the testnet passphrase. It does not provide Web3 security or self-custody. |
+
+Remove an old route or table only after its replacement is tested, all callers are moved, existing records are inventoried, and a non-destructive migration path is reviewed. Applied SQL migrations remain immutable. The old RWF ledger and any Stellar asset must have separate names and balance displays throughout the transition.
 
 ## Ownership and custody
 

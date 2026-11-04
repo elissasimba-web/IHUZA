@@ -1,5 +1,7 @@
 # IHUZA+ payment and ledger design — review draft
 
+Historical internal RWF-wallet design. The current Stellar Web3-first direction and component transition are recorded in `WEB3_STELLAR_ARCHITECTURE.md`. This document remains useful for accounting and reconciliation requirements; its proposed internal transfer service is not the approved on-chain payment implementation.
+
 Status: an isolated test ledger and a dormant production wallet-ledger schema foundation were installed on 2026-11-03. The intended product has an IHUZA+ wallet for holding value in each user's account and making internal person-to-person and merchant payments. No production transfer service, funding rail, settlement, or verified receipt is implemented.
 
 ## Agreed wallet direction (2026-11-03)
