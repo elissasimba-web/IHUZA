@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     env,
+    fmt::Write as _,
 };
 
 use argon2::{
@@ -15,6 +16,7 @@ use axum::{
     routing::{get, patch, post},
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+use qrcodegen::{QrCode, QrCodeEcc};
 use rand_core::{OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -368,6 +370,7 @@ fn app(pool: PgPool) -> Router {
         .route("/auth/logout", post(logout))
         .route("/auth/me", get(current_user))
         .route("/account/qr-reference", get(account_qr_reference))
+        .route("/account/qr.svg", get(account_qr_svg))
         .route("/wallet", post(open_wallet).get(get_wallet))
         .route("/wallet/transfer-intents", post(create_transfer_intent))
         .route("/wallet/invoice-intents", post(create_invoice_intent))
@@ -1553,11 +1556,18 @@ async fn account_qr_reference(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<AccountQrReferenceResponse>, ApiError> {
+    let reference = owned_account_qr_reference(&state.pool, &headers).await?;
+    Ok(Json(AccountQrReferenceResponse { reference }))
+}
+
+async fn owned_account_qr_reference(
+    pool: &PgPool,
+    headers: &HeaderMap,
+) -> Result<String, ApiError> {
     let Some(session_token) = bearer_token(&headers) else {
         return Err(ApiError::unauthorized());
     };
-
-    let reference = sqlx::query_scalar::<_, String>(
+    sqlx::query_scalar::<_, String>(
         "SELECT u.account_qr_reference
          FROM user_sessions s
          JOIN users u ON u.id = s.user_id
@@ -1567,12 +1577,66 @@ async fn account_qr_reference(
            AND u.is_active = TRUE",
     )
     .bind(hash_session_token(session_token))
-    .fetch_optional(&state.pool)
+    .fetch_optional(pool)
     .await
     .map_err(|_| ApiError::internal())?
-    .ok_or_else(ApiError::unauthorized)?;
+    .ok_or_else(ApiError::unauthorized)
+}
 
-    Ok(Json(AccountQrReferenceResponse { reference }))
+fn account_qr_svg_markup(reference: &str) -> Result<String, ApiError> {
+    if reference.len() != 48 || !reference.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(ApiError::internal());
+    }
+    let qr = QrCode::encode_text(reference, QrCodeEcc::Medium).map_err(|_| ApiError::internal())?;
+    let quiet_zone = 4;
+    let side = qr.size() + quiet_zone * 2;
+    let mut svg = format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {side} {side}\" width=\"{}\" height=\"{}\" shape-rendering=\"crispEdges\"><rect width=\"{side}\" height=\"{side}\" fill=\"#fff\"/><path fill=\"#000\" d=\"",
+        side * 8,
+        side * 8
+    );
+    for y in 0..qr.size() {
+        let mut x = 0;
+        while x < qr.size() {
+            if !qr.get_module(x, y) {
+                x += 1;
+                continue;
+            }
+            let start = x;
+            while x < qr.size() && qr.get_module(x, y) {
+                x += 1;
+            }
+            let run = x - start;
+            write!(
+                svg,
+                "M{} {}h{run}v1h-{run}z",
+                start + quiet_zone,
+                y + quiet_zone
+            )
+            .map_err(|_| ApiError::internal())?;
+        }
+    }
+    svg.push_str("\"/></svg>");
+    Ok(svg)
+}
+
+async fn account_qr_svg(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Response, ApiError> {
+    let reference = owned_account_qr_reference(&state.pool, &headers).await?;
+    let svg = account_qr_svg_markup(&reference)?;
+    Ok((
+        [
+            (
+                axum::http::header::CONTENT_TYPE,
+                "image/svg+xml; charset=utf-8",
+            ),
+            (axum::http::header::CACHE_CONTROL, "private, no-store"),
+        ],
+        svg,
+    )
+        .into_response())
 }
 
 async fn approve_merchant_application(
@@ -2585,6 +2649,34 @@ mod tests {
             .expect("the route should return a response");
 
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn account_qr_svg_requires_a_bearer_token() {
+        let pool = PgPoolOptions::new()
+            .connect_lazy("postgres://ignored:ignored@127.0.0.1:5432/ihuza")
+            .expect("a lazy test pool should be valid");
+        let request = Request::builder()
+            .method("GET")
+            .uri("/account/qr.svg")
+            .body(Body::empty())
+            .expect("request should be valid");
+        let response = app(pool)
+            .oneshot(request)
+            .await
+            .expect("route should respond");
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[test]
+    fn account_qr_svg_encodes_only_a_valid_opaque_reference() {
+        let reference = "0123456789abcdef0123456789abcdef0123456789abcdef";
+        let svg = account_qr_svg_markup(reference).expect("valid reference should make an SVG");
+        assert!(svg.starts_with("<svg xmlns=\"http://www.w3.org/2000/svg\""));
+        assert!(svg.contains("shape-rendering=\"crispEdges\""));
+        assert!(svg.contains("<path fill=\"#000\" d=\"M"));
+        assert!(!svg.contains(reference));
+        assert!(account_qr_svg_markup("not-a-reference").is_err());
     }
 
     #[tokio::test]

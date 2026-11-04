@@ -14,6 +14,7 @@ Status: an isolated test ledger and a dormant production wallet-ledger schema fo
 
 - Customer checkout creates a server-priced `PENDING` Smart Invoice with item snapshots and an idempotency key.
 - Authenticated `GET /qr/{reference}` resolves the one account QR as an approved merchant checkout destination or an ordinary person transfer destination. It returns a display name and RWF, not a balance or permission to debit; it rejects self-scans. No person-to-person transfer endpoint exists yet.
+- Authenticated `GET /account/qr.svg` renders the same persistent account reference as a compact SVG QR. The payload is only the opaque reference; it has no amount, invoice, provider choice, balance, or secret. This backend image does not by itself provide a mobile scanner or a payment operation.
 - Invoice list and detail are scoped to the customer and merchant owner.
 - The applied `transactions` migration has amount, currency, payment method/reference, and status, but no API writes to it yet.
 - `test_ledger_*` tables and `test_ledger_transfer` provide an isolated RWF test ledger with paired postings, a posted-balance view, key-based retries, and overspend checks for test users. No API invokes it; it is separate from the production wallet-ledger schema.
@@ -32,7 +33,7 @@ The brief's **dynamic payment QR** would introduce a second QR containing a paym
 
 Do not interpret “wallet activation” as permission to accept funds: `ACTIVE` currently means that a zero-value account record can be used once a verified money service is built and enabled. `money_operations_enabled` remains false. “Available balance” cannot be promised until holds, pending transfers, and release rules are defined; the current `balance` is a ledger-derived posted balance only. The brief's request for a successful internal payment depends on a verified, safeguarded source of initial RWF value and a reviewed posting authority. Test fixtures cannot be used to claim a real successful payment.
 
-The next implementation step is a payer-owned, idempotent **pending transfer/payment intent** linked to the scanned destination and optionally to an existing Smart Invoice. Creation must validate recipient role and invoice ownership, currency, positive amount, request hash, and retry behavior; it must neither debit, credit, mark an invoice paid, nor issue a receipt. After database access returns, add and apply a corrective migration for this intent and its state rules, then build and test the authenticated API. The later posting step must commit the ledger batch, final payment state, and receipt linkage atomically through a narrowly permitted operation, with concurrency and failure tests. Real funding and transfers remain disabled until safeguarding and reconciliation are established.
+Payer-owned, idempotent `DRAFT` intents now exist for person transfers and customer-owned Smart Invoices. They neither debit, credit, mark an invoice paid, nor issue a receipt. The later posting step must commit the ledger batch, final payment state, and receipt linkage atomically through a narrowly permitted operation, with concurrency and failure tests. Real funding and transfers remain disabled until safeguarding and reconciliation are established.
 
 ## Gaps in the applied schema
 
