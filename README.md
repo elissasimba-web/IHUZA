@@ -1,18 +1,30 @@
-# IHUZA+ Web3 rebuild
+# IHUZA+
 
-This branch starts a new Stellar-based IHUZA+ implementation. The prior Rust API, SQL migrations, and tests remain in Git history and on `main`; the existing PostgreSQL database was not altered.
+**One Account. Every Service.**
 
-## Product boundaries
+IHUZA+ ni umushinga wa serivisi z'imari n'iz'ubucuruzi ugenewe u Rwanda. Ubu iyi repository ni **prototype ya Stellar Web3**; si app yuzuye cyangwa serivisi yakira amafaranga nyayo.
 
-- One persistent, opaque IHUZA+ account QR opens a server-validated person-transfer or approved-merchant checkout context.
-- The customer owns and signs with their Stellar wallet. App login or an administrator cannot sign or spend on their behalf.
-- Merchant catalog, prices, private Smart Invoices, Receipt Vault, and Merchant Assistant records belong in a privacy-protecting application layer. Any payment claim needs independently verified chain settlement.
-- No real RWF token, CBDC, EBM, bank, MTN, or Airtel integration exists in this branch. Testnet assets must be clearly labelled as test value.
+## Ibyakozwe kandi byagenzuwe
 
-## First code slice
+- Rust workspace irimo Soroban `intent_anchor` contract. Nyiri aderesi ya Stellar agomba kwemeza intent hash; contract igenzura igihe ntarengwa kandi ikumira gusubiramo iyo hash ikiri mu bubiko. Nta mafaranga iyi contract yimura.
+- `cargo test --locked --offline` yatsinze; `stellar contract build` yatanze Wasm. Nta contract yashyizwe kuri testnet cyangwa mainnet.
+- `scripts/check_stellar_testnet.ps1` ni read-only network probe; ntabwo ari payment integration.
 
-`contracts/intent_anchor` is a Rust/Soroban contract that records a single time-limited commitment authorized by its wallet owner. It prevents replay of the same owner/hash while active. It does **not** transfer assets, verify a payment, bind the QR, or issue a receipt. A production intent format must canonically bind network, contract, owner, recipient, asset, amount, invoice reference, nonce, and expiry before this contract could support checkout.
+## Ibyo project izubaka
 
-Run `cargo test --locked` from this directory. Build Wasm with `stellar contract build` only after the SDK and CLI compatibility are checked. Do not deploy or use for real funds without an independent security review.
+Umukiriya azakoresha wallet yigenzurira, ascan-e **QR imwe ihoraho** ya konti y'umucuruzi, abone catalog n'ibiciro byashyizweho n'uwo mucuruzi, ahitemo ibicuruzwa, abone Smart Invoice yagenzuwe na server, hanyuma yemeze transaction muri wallet ye. Nyuma y'uko ubwishyu bwemejwe byigenga kuri Stellar, IHUZA+ izabika inyemezabwishyu muri Receipt Vault no kumenyesha umucuruzi. QR ya konti isanzwe izafungura uburyo bwo kohereza amafaranga hagati y'abantu, nta catalog y'umucuruzi.
 
-See [the full transition design](docs/WEB3_STELLAR_ARCHITECTURE.md) for the complete customer, merchant, payment, Receipt Vault, and Merchant Assistant roadmap.
+Merchant Assistant izafasha umucuruzi kwandika suppliers, procurement, stock movements, ibicuruzwa, sales na reports. Ibyo byose n'inyandiko z'abakiriya bizabikwa mu buryo burinda amakuru yihariye; si ngombwa kubishyira kuri blockchain.
+
+Reba [ibyo twemeranyijwe ku bicuruzwa](docs/PRODUCT_REQUIREMENTS.md) n'[imyubakire ya tekiniki](docs/ARCHITECTURE.md). Ibyakozwe mbere bya Rust/Axum/PostgreSQL biri mu ishami `main` no mu mateka ya Git; database yabyo ntiyahinduwe n'iri shami.
+
+## Gutangira
+
+Ibisabwa: Rust, `wasm32v1-none` target, na Stellar CLI ihuye na Soroban SDK v26.
+
+```powershell
+cargo test --locked
+stellar contract build
+```
+
+Nta mabanga ya wallet ashyirwa muri iyi repository. Nta RWF token, CBDC, EBM, bank, MTN cyangwa Airtel integration irimo. Iyimurika rigomba kwerekana prototype nk'uko iri, rikavuga neza ko ubwishyu nyabwo na Receipt Vault bitarubakwa.
