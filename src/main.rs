@@ -257,6 +257,26 @@ struct InvoiceIntentResponse {
     money_moved: bool,
 }
 
+#[derive(Deserialize)]
+struct IntentListQuery {
+    limit: Option<i64>,
+    offset: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+struct WalletIntentSummaryResponse {
+    id: String,
+    intent_kind: String,
+    invoice_id: Option<String>,
+    invoice_number: Option<String>,
+    recipient_name: String,
+    amount: String,
+    currency: String,
+    status: String,
+    created_at: String,
+    money_moved: bool,
+}
+
 #[derive(Debug)]
 struct NewRegistration {
     phone_number: String,
@@ -351,6 +371,7 @@ fn app(pool: PgPool) -> Router {
         .route("/wallet", post(open_wallet).get(get_wallet))
         .route("/wallet/transfer-intents", post(create_transfer_intent))
         .route("/wallet/invoice-intents", post(create_invoice_intent))
+        .route("/wallet/intents", get(list_wallet_intents))
         .route("/auth/password", patch(change_password))
         .route("/merchants/apply", post(apply_for_merchant))
         .route(
@@ -968,6 +989,98 @@ fn valid_uuid_text(value: &str) -> bool {
                 byte.is_ascii_hexdigit()
             }
         })
+}
+
+type WalletIntentRow = (
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    String,
+    String,
+    String,
+    String,
+    String,
+);
+
+async fn wallet_intents_for_customer(
+    connection: &mut PgConnection,
+    customer_id: &str,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<WalletIntentSummaryResponse>, ApiError> {
+    let rows = sqlx::query_as::<_, WalletIntentRow>(
+        "SELECT t.id::text, t.intent_kind, t.invoice_id::text,
+                i.invoice_number,
+                CASE WHEN t.intent_kind = 'MERCHANT_INVOICE'
+                     THEN m.business_name
+                     ELSE concat_ws(' ', recipient.first_name, recipient.last_name)
+                END AS recipient_name,
+                t.amount::text, btrim(t.currency), t.status, t.created_at::text
+         FROM wallet_transfer_intents t
+         JOIN users recipient ON recipient.id = t.recipient_user_id
+         LEFT JOIN invoices i ON i.id = t.invoice_id
+         LEFT JOIN merchant_profiles m ON m.id = i.merchant_id
+         WHERE t.sender_user_id = $1::uuid
+         ORDER BY t.created_at DESC, t.id DESC
+         LIMIT $2 OFFSET $3",
+    )
+    .bind(customer_id)
+    .bind(limit)
+    .bind(offset)
+    .fetch_all(connection)
+    .await
+    .map_err(|_| ApiError::internal())?;
+    Ok(rows
+        .into_iter()
+        .map(
+            |(
+                id,
+                intent_kind,
+                invoice_id,
+                invoice_number,
+                recipient_name,
+                amount,
+                currency,
+                status,
+                created_at,
+            )| {
+                WalletIntentSummaryResponse {
+                    id,
+                    intent_kind,
+                    invoice_id,
+                    invoice_number,
+                    recipient_name,
+                    amount,
+                    currency,
+                    status,
+                    created_at,
+                    money_moved: false,
+                }
+            },
+        )
+        .collect())
+}
+
+async fn list_wallet_intents(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<IntentListQuery>,
+) -> Result<Json<Vec<WalletIntentSummaryResponse>>, ApiError> {
+    let customer_id = require_customer(&state.pool, &headers).await?;
+    let limit = query.limit.unwrap_or(20);
+    let offset = query.offset.unwrap_or(0);
+    if !(1..=50).contains(&limit) || !(0..=100_000).contains(&offset) {
+        return Err(ApiError::bad_request("Invalid intent page"));
+    }
+    let mut connection = state
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| ApiError::internal())?;
+    Ok(Json(
+        wallet_intents_for_customer(&mut connection, &customer_id, limit, offset).await?,
+    ))
 }
 
 async fn approved_merchant_from_reference(
@@ -2530,6 +2643,23 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn wallet_intent_list_requires_a_bearer_token() {
+        let pool = PgPoolOptions::new()
+            .connect_lazy("postgres://ignored:ignored@127.0.0.1:5432/ihuza")
+            .expect("a lazy test pool should be valid");
+        let request = Request::builder()
+            .method("GET")
+            .uri("/wallet/intents")
+            .body(Body::empty())
+            .expect("request should be valid");
+        let response = app(pool)
+            .oneshot(request)
+            .await
+            .expect("route should respond");
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
     #[ignore = "requires APP_DATABASE_URL; invoice fixtures are rolled back"]
     async fn invoice_intent_uses_server_total_and_is_idempotent() {
         dotenvy::dotenv().ok();
@@ -2648,6 +2778,57 @@ mod tests {
         .expect("invoice and wallet should be readable");
         assert_eq!(invoice_status, "PENDING");
         assert_eq!(wallet_balance, "0.00");
+        let person_id: String = sqlx::query_scalar(
+            "INSERT INTO users (phone_number, password_hash, first_name)
+             VALUES ($1, 'intent-list-test-hash', 'Friend') RETURNING id::text",
+        )
+        .bind(format!("intent-list-friend-{suffix}"))
+        .fetch_one(&mut *tx)
+        .await
+        .expect("person should be created");
+        sqlx::query(
+            "INSERT INTO wallet_transfer_intents
+             (sender_user_id, recipient_user_id, amount, request_key, request_hash)
+             VALUES ($1::uuid, $2::uuid, 2.00, $3, $4)",
+        )
+        .bind(&customer_id)
+        .bind(&person_id)
+        .bind(format!("intent-list-{suffix}"))
+        .bind("b".repeat(64))
+        .execute(&mut *tx)
+        .await
+        .expect("person draft should be created");
+        let list = wallet_intents_for_customer(&mut tx, &customer_id, 50, 0)
+            .await
+            .expect("customer should read their drafts");
+        assert_eq!(list.len(), 2);
+        assert!(list.iter().any(|item| {
+            item.intent_kind == "MERCHANT_INVOICE"
+                && item.invoice_id.as_deref() == Some(invoice_id.as_str())
+                && item.recipient_name == "Test Shop"
+                && item.amount == "15.00"
+                && !item.money_moved
+        }));
+        assert!(list.iter().any(|item| {
+            item.intent_kind == "PERSON"
+                && item.invoice_id.is_none()
+                && item.recipient_name == "Friend"
+                && item.amount == "2.00"
+                && !item.money_moved
+        }));
+        assert_eq!(
+            wallet_intents_for_customer(&mut tx, &customer_id, 1, 1)
+                .await
+                .expect("second page should be readable")
+                .len(),
+            1
+        );
+        assert!(
+            wallet_intents_for_customer(&mut tx, &merchant_user_id, 50, 0)
+                .await
+                .expect("other user should receive an empty list")
+                .is_empty()
+        );
         tx.rollback().await.expect("fixtures should roll back");
     }
 
