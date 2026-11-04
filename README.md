@@ -16,7 +16,7 @@ Umukiriya azakoresha wallet yigenzurira, ascan-e **QR imwe ihoraho** ya konti y'
 
 Merchant Assistant izafasha umucuruzi kwandika suppliers, procurement, stock movements, ibicuruzwa, sales na reports. Ibyo byose n'inyandiko z'abakiriya bizabikwa mu buryo burinda amakuru yihariye; si ngombwa kubishyira kuri blockchain.
 
-Reba [ibyo twemeranyijwe ku bicuruzwa](docs/PRODUCT_REQUIREMENTS.md) n'[imyubakire ya tekiniki](docs/ARCHITECTURE.md). Ibyakozwe mbere bya Rust/Axum/PostgreSQL biri mu ishami `main` no mu mateka ya Git; database yabyo ntiyahinduwe n'iri shami.
+Reba [ibyo twemeranyijwe ku bicuruzwa](docs/PRODUCT_REQUIREMENTS.md) n'[imyubakire ya tekiniki](docs/ARCHITECTURE.md). Iyi prototype ntikoresha database cyangwa API kugeza ubu.
 
 ## Gutangira
 

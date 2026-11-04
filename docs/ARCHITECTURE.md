@@ -4,7 +4,7 @@
 
 Iri shami rifite Soroban `intent_anchor` contract na read-only testnet probe gusa. Nta frontend, API, database schema nshya, wallet connection, QR resolver, chain indexer, payment cyangwa Receipt Vault birimo. Mu iyimurika bigomba kuvugwa uko biri.
 
-Ishami `main` rifite backend ya kera ya Axum/SQLx na PostgreSQL migrations 19 zashyizwe muri database. Ni amateka n'isoko y'ibitekerezo; code yayo ntiri muri iri shami. Database iriho ntiyagomba gusibwa cyangwa gukoreshwa nk'aho ari wallet ya Stellar.
+Iyi prototype ntikoresha PostgreSQL kugeza ubu. Hazakenerwa database nshya y'amakuru ya off-chain, yubatse ku bisabwa n'iyi architecture; ntituzafata records za database ya kera nk'aho ari amafaranga ya Stellar.
 
 ## Aho buri kintu kizaba
 
