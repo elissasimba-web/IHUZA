@@ -8,6 +8,7 @@ use sqlx::postgres::PgPoolOptions;
 #[tokio::test]
 #[ignore = "requires DATABASE_URL; wallet fixture rows are rolled back"]
 async fn wallet_ledger_rejects_unbacked_or_unbalanced_value() {
+    dotenvy::dotenv().ok();
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
     let pool = PgPoolOptions::new()
         .max_connections(2)

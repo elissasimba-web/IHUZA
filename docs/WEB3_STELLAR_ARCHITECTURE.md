@@ -1,12 +1,14 @@
 # IHUZA+ — Stellar Web3 architecture transition
 
-Status: target architecture and implementation plan, 2026-11-04. This document does not enable real-money operations or claim a deployed Stellar integration.
+Status: whole-platform target architecture and implementation plan, 2026-11-04. This document does not enable real-money operations or claim a deployed Stellar integration.
 
 ## Product decision
 
-IHUZA+ will be built as a Stellar-based Web3 application. A customer must authorize any on-chain movement from their own wallet. Soroban is the smart-contract platform; contracts are written in Rust, not Solidity. The existing Rust/Axum/PostgreSQL backend remains the application, privacy, identity, catalog, and indexing layer. "Web3-first" does not require putting private customer or invoice data on a public ledger.
+IHUZA+ will be built as a Stellar-based Web3 application across its customer, merchant, payment, record, and service flows. A customer must authorize any on-chain movement from their own wallet. Soroban is the smart-contract platform; contracts are written in Rust, not Solidity. The existing Rust/Axum/PostgreSQL backend remains the application, privacy, identity, catalog, and indexing layer. Public-chain storage is selected by verifiability and consent requirements, not by the label "Web3".
 
 The existing single persistent opaque account QR stays the entry point. The server resolves it to a role-gated destination and current checkout context. A Smart Invoice or payment request may have a server-side reference, but there is no second invoice/payment QR.
+
+There is no universal rule that an API, database, password login, or merchant dashboard is forbidden in Web3. For IHUZA+, the decisive tests are: who can authorize asset movement, what can be independently verified on Stellar, whether private records stay protected, and whether the app can truthfully reconcile each financial claim. Remove a centralized capability when it violates those tests or a tested replacement makes it redundant, not because its implementation uses PostgreSQL.
 
 ## What exists and what does not
 
@@ -31,6 +33,37 @@ This table is based on the current routes, Cargo dependencies, and installed SQL
 | Read-only Stellar testnet RPC probe, but no Stellar app/Soroban implementation | Add wallet ownership proof, signing, adapter, event indexer, tests, and only necessary contracts | `scripts/check_stellar_testnet.ps1` verifies `getNetwork` and the testnet passphrase. It does not provide Web3 security or self-custody. |
 
 Remove an old route or table only after its replacement is tested, all callers are moved, existing records are inventoried, and a non-destructive migration path is reviewed. Applied SQL migrations remain immutable. The old RWF ledger and any Stellar asset must have separate names and balance displays throughout the transition.
+
+## Whole-platform domain decisions
+
+The first column describes the actual repository, not a completed Web3 feature. "Off-chain" means the data remains private or operational; it does not mean it is exempt from Web3 security and payment verification.
+
+| Domain | Current repository | Stellar Web3 target and removal rule |
+| --- | --- | --- |
+| Identity, authentication, roles | Password login, sessions, CUSTOMER/MERCHANT/ADMIN roles, security events | Keep private identity and role checks. Add proof that the logged-in user controls the linked Stellar address; wallet spending requires the user's signature. Remove any assumption that app login can authorize chain spending. |
+| Account and QR | One opaque account QR, role-gated resolver, QR SVG | Keep one QR. Resolve it to a current verified wallet destination and approved merchant context. Never make the QR a bearer credential or a source of spend authority. |
+| Merchant onboarding | Application and admin approval work | Keep private KYC/business review and audit. If a public merchant attestation is later needed, publish only a minimal revocable proof; merchant approval in PostgreSQL alone cannot grant a contract spending permission. |
+| Products and catalog | Merchant-owned RWF prices and product-image references | Keep product details off-chain. Bind a checkout quote to a merchant, item snapshots, currency, expiry, and selected payment asset. The customer reviews any conversion before signing. No contract should set retail prices. |
+| Suppliers and procurement | SQL tables exist; no supplier/procurement API in the current routes | Build owner-scoped management and stock movements separately. Keep supplier identities, purchase costs, and private commercial terms off-chain. Only independently authorized settlement references may be linked to chain payments. |
+| Smart Invoice | Server-priced pending drafts, item snapshots, owner reads | Keep detailed invoice off-chain. Commit only a minimal opaque reference or privacy-reviewed hash if an on-chain proof is useful. Chain settlement must match the invoice's locked payment terms; a draft remains unpaid. |
+| Wallet and person transfer | Zero-value internal RWF wallet and DRAFT intents | Replace user-facing spendable balance with a user-controlled Stellar wallet and independently verified chain asset balance. Retire internal-wallet routes only after a tested replacement; preserve historical financial records. |
+| Merchant payment | Invoice-linked DRAFT intent; no payment execution | Bind signed chain operation to recipient, asset, amount, network, invoice, and expiry. Verify success and uniqueness from Stellar before marking paid. A submitted hash is insufficient. |
+| Transactions and Receipt Vault | `transactions` table exists; no verified payment or receipt API | Index verified chain results into durable transaction and immutable receipt records for customer and merchant. Keep full receipts private, linked to a minimal chain reference. Refunds and adjustments are new linked records. |
+| Notifications and Merchant Assistant | No verified-payment notification or complete sales/profit API | Generate notices and reports from verified payments and traceable stock/cost records. Notifications do not prove goods were delivered, and AI never decides that settlement succeeded. |
+| Transport, bills, insurance and healthcare | No current service routes | Add each service after its partner, consent, privacy, fulfillment, and payment contract are specified. Do not place medical, travel, or insurance records on a public chain. |
+| External bank/mobile-money/EBM/CBDC | No verified integration | Implement only through documented approved adapters. Keep off-chain settlement and official tax documents distinct from Stellar proof and IHUZA+ receipts. |
+| Frontend and deployment | No frontend in this repository | Build accessible wallet confirmation, QR scan, customer checkout, merchant dashboard, and clear testnet labels. Protect signing UI from transaction substitution, malicious scripts, and misleading status. |
+
+## Whole-platform security requirements
+
+1. **Identity and consent:** App sessions identify the user, while wallet signatures authorize chain actions. Address linking requires a one-time, network-specific signed challenge, expiry, and replay protection. Lost-device recovery must be explicit and must not silently transfer custody to IHUZA+.
+2. **Data and privacy:** Keep names, phones, item lists, supplier costs, travel/health records, and full receipts off-chain. Review even hashes for correlation or dictionary attacks before publishing. Encrypt sensitive data where appropriate and retain auditable access rules.
+3. **QR and checkout:** Resolve the account QR on the server, check current merchant approval and wallet binding, lock quote terms, and show the payer the final destination, asset, amount, network, and fee before signing. Recheck those values in the chain result.
+4. **Contract and asset controls:** Define each Soroban contract's exact responsibility and its admin, upgrade, pause, recovery, authorization, and event rules. Test wrong signer, forged destination, replay, duplicate payment, reentrancy where applicable, storage expiry, and unauthorized upgrade. A token issuer's freeze or clawback powers must be documented honestly.
+5. **Settlement and records:** Distinguish prepared, submitted, failed, and verified operations. Index chain events idempotently; tolerate RPC failure and restart without double receipts. Reconcile on-chain value, internal records, and any regulated off-chain reserve or provider settlement.
+6. **Operations:** Separate development, testnet, and production credentials. Never put user signing secrets in server env vars, logs, or Git. Review dependencies, build artifacts, deployment keys, RPC trust, rate limits, monitoring, incident response, backups, and independent security findings before real funds.
+
+No current test or testnet RPC probe proves these requirements have been met. The existing Rust tests cover selected API and database behavior; they do not audit Soroban, wallet custody, frontend signing, or end-to-end settlement.
 
 ## Ownership and custody
 
@@ -76,12 +109,20 @@ Use Stellar native payment and asset features where they satisfy the requirement
 
 ## Implementation order
 
-1. Agree the wallet custody/recovery model and first testnet asset, and map the existing internal RWF ledger to the intended Stellar asset model.
-2. Add user-owned Stellar address binding with signed challenge, network separation, replay protection, and owner-scoped reads. No private keys on the server.
-3. Add a read-only Stellar testnet adapter and verification tests; then a signed testnet transfer flow with explicit user confirmation.
-4. Specify and test the minimal Soroban contract only after deciding what native Stellar payments cannot do. Add event indexing and restart/replay recovery tests.
-5. Link verified testnet payment events to the one-QR checkout, pending Smart Invoice, Receipt Vault, and merchant notifications. Build a demonstrable customer and merchant UI.
-6. Run end-to-end, concurrency, abuse, custody-recovery, and independent contract/security reviews. Prepare a clear competition demo that labels all test funds.
-7. Complete the issuer, licensing, safeguarding, partner, privacy, and reconciliation work before considering real-money or mainnet activation.
+1. Inventory every current route, table, test, and data dependency against the whole-platform decisions above. Mark what is retained, replaced, or retired, with a reversible path for each replacement.
+2. Define the testnet asset, non-custodial wallet/recovery model, merchant address binding, quote-to-chain conversion rules, contract scope, and privacy boundaries. Keep production RWF status unresolved until issuer and redemption details are known.
+3. Implement user-owned Stellar address binding with a signed, expiring, network-specific challenge. Extend identity and merchant approval without granting app administrators chain spending powers.
+4. Build the signed testnet person-transfer and one-QR merchant-checkout flows, using current product and invoice snapshots. Add a minimal Soroban contract only for behavior native Stellar payments cannot provide.
+5. Verify chain results independently and index them idempotently. Build immutable Receipt Vault records, merchant notifications, disputes, and linked refunds; connect Merchant Assistant sales and accounting to those verified records.
+6. Implement the customer and merchant frontend, owner-scoped supplier/procurement/stock flows, and any additional services only after their privacy and partner rules are defined. Remove superseded draft-only routes after migration tests pass.
+7. Run contract, API, frontend, concurrency, privacy, key-recovery, and end-to-end security reviews. Demonstrate only clearly labelled testnet value in competitions.
+8. Complete issuer, licensing, safeguarding, partner, EBM/tax, and reconciliation work before considering real-money or mainnet activation. Retire legacy tables only after historical and legal obligations are satisfied.
 
 No production network, live RWF asset, on-chain contract, or real-money route is selected or enabled by this document.
+
+## Technical references
+
+- Stellar account authorization: https://developers.stellar.org/docs/data/apis/horizon/api-reference/resources/accounts
+- Soroban Rust SDK and supported build target: https://github.com/stellar/rs-soroban-sdk
+- Stellar security guidance for web applications: https://developers.stellar.org/docs/build/security-docs/securing-web-based-projects
+- Stellar RPC `getNetwork`: https://developers.stellar.org/docs/data/apis/rpc/api-reference/methods/getNetwork

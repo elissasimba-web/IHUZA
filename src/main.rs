@@ -2927,6 +2927,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires DATABASE_URL; wallet fixture rows are rolled back"]
     async fn wallet_provisioning_is_zero_balance_and_idempotent() {
+        dotenvy::dotenv().ok();
         let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
         let pool = PgPoolOptions::new()
             .max_connections(2)
@@ -3087,6 +3088,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires DATABASE_URL and writes then removes isolated test data"]
     async fn only_admin_can_approve_a_pending_merchant() {
+        dotenvy::dotenv().ok();
         let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
         let pool = PgPoolOptions::new()
             .max_connections(2)
@@ -3733,6 +3735,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires DATABASE_URL and writes then removes isolated test data"]
     async fn merchant_application_stays_pending_and_cannot_be_duplicated() {
+        dotenvy::dotenv().ok();
         let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
         let pool = PgPoolOptions::new()
             .max_connections(2)
@@ -3835,6 +3838,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires DATABASE_URL and writes then removes isolated test data"]
     async fn login_and_logout_store_and_revoke_a_session() {
+        dotenvy::dotenv().ok();
         let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
         let pool = PgPoolOptions::new()
             .max_connections(2)
@@ -4064,6 +4068,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires DATABASE_URL and writes then removes isolated test data"]
     async fn failed_logins_are_rate_limited_and_audited() {
+        dotenvy::dotenv().ok();
         let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
         let pool = PgPoolOptions::new()
             .max_connections(2)

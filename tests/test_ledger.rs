@@ -8,6 +8,7 @@ use sqlx::postgres::PgPoolOptions;
 #[tokio::test]
 #[ignore = "requires DATABASE_URL; all test ledger rows are rolled back"]
 async fn test_ledger_posts_balanced_idempotent_transfers_and_rejects_bad_changes() {
+    dotenvy::dotenv().ok();
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
     let pool = PgPoolOptions::new()
         .max_connections(2)

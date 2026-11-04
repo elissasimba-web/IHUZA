@@ -143,7 +143,8 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "requires DATABASE_URL and rolls back isolated test data"]
-    async fn initial_admin_is_granted_once_with_an_audit_event() {
+    async fn admin_bootstrap_grants_once_or_rejects_existing_admin() {
+        dotenvy::dotenv().ok();
         let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
         let pool = PgPoolOptions::new()
             .max_connections(1)
@@ -172,6 +173,45 @@ mod tests {
         .execute(&mut *transaction)
         .await
         .expect("customer role should be assigned");
+
+        let admin_already_exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS (
+                 SELECT 1 FROM user_roles ur JOIN roles r ON r.id = ur.role_id
+                 WHERE r.name = 'ADMIN'
+             )",
+        )
+        .fetch_one(&mut *transaction)
+        .await
+        .expect("admin state should be queryable");
+        if admin_already_exists {
+            assert!(
+                grant_initial_admin(&mut transaction, &phone_number)
+                    .await
+                    .is_err()
+            );
+            let candidate_role_count: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM user_roles ur JOIN roles r ON r.id = ur.role_id
+                 WHERE ur.user_id = $1::uuid AND r.name = 'ADMIN'",
+            )
+            .bind(&user_id)
+            .fetch_one(&mut *transaction)
+            .await
+            .expect("candidate role should be queryable");
+            let candidate_audit_count: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM security_events
+                 WHERE user_id = $1::uuid AND event_type = 'ADMIN_BOOTSTRAPPED'",
+            )
+            .bind(&user_id)
+            .fetch_one(&mut *transaction)
+            .await
+            .expect("candidate audit should be queryable");
+            assert_eq!((candidate_role_count, candidate_audit_count), (0, 0));
+            transaction
+                .rollback()
+                .await
+                .expect("test changes should roll back");
+            return;
+        }
 
         grant_initial_admin(&mut transaction, &phone_number)
             .await
