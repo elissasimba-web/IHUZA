@@ -25,3 +25,5 @@ Iyi ni plan n'uko prototype ya review ihagaze kuri Stellar testnet. Nyiri projec
 - Ese display name public ihindurwa ite, kandi ni ryari merchant catalog yemerewe kugaragara?
 
 Migration `004_merchant_approval_votes.sql` ni iya testnet gusa. `IHUZA_REVIEWER_ADDRESSES` igomba kuba irimo public addresses eshatu zemewe kandi zitandukanye; iyo ibuze, review endpoint irafungwa kandi QR ikomeza gufata konti nk'isanzwe. Igeragezwa rya local rikoresha keys z'igihe gito muri memory gusa. Nta approval yo mu production cyangwa payment izatangizwa n'iyi prototype.
+
+Web ubu ibaza API niba session iriho ari iya reviewer mbere yo kwerekana review panel. Ibi bifasha UX gusa; uburenganzira bw'ukuri bugenzurwa nanone kuri `GET/POST /api/merchant-review/{reference}`.

@@ -42,6 +42,7 @@ const reviewName = document.querySelector('#review-name');
 const reviewMessage = document.querySelector('#review-message');
 const reviewSignButton = document.querySelector('#review-sign-button');
 const reviewStatus = document.querySelector('#review-status');
+const reviewerPanel = document.querySelector('#reviewer-panel');
 const merchantCatalogSection = document.querySelector('#merchant-catalog-section');
 const productForm = document.querySelector('#product-form');
 const productName = document.querySelector('#product-name');
@@ -77,10 +78,24 @@ function clearOwnership() {
   reviewPreview.hidden = true;
   reviewReference.disabled = false;
   reviewStatus.textContent = '';
+  reviewerPanel.hidden = true;
   merchantCatalogSection.hidden = true;
   ownProducts.replaceChildren();
   productStatus.textContent = '';
   ownershipMessage.textContent = '';
+}
+
+async function refreshReviewerStatus() {
+  reviewerPanel.hidden = true;
+  const reference = accountReference.textContent;
+  try {
+    const eligible = await merchantReview.status();
+    if (reference === accountReference.textContent && !ownershipResult.hidden) {
+      reviewerPanel.hidden = !eligible;
+    }
+  } catch {
+    reviewerPanel.hidden = true;
+  }
 }
 
 function showProducts(list, products) {
@@ -168,6 +183,7 @@ async function restoreSession() {
     activeReview = null;
     reviewPreview.hidden = true;
     reviewReference.disabled = false;
+    reviewerPanel.hidden = true;
     merchantCatalogSection.hidden = true;
     ownProducts.replaceChildren();
     return;
@@ -175,6 +191,7 @@ async function restoreSession() {
   ownershipMessage.textContent = 'Session ya testnet irakora.';
   await showAccountQr(session.qr_reference);
   await refreshMerchantApplication();
+  await refreshReviewerStatus();
 }
 
 async function check(method) {
@@ -235,6 +252,7 @@ async function signOwnership() {
       ownershipMessage.textContent = 'Umukono wagenzuwe na IHUZA+ API.';
       await showAccountQr(result.qr_reference);
       await refreshMerchantApplication();
+      await refreshReviewerStatus();
     } else {
       clearOwnership();
       ownershipMessage.textContent = result.message;

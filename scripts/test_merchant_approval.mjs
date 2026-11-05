@@ -94,6 +94,9 @@ try {
   const reviewerTwo = await login(3001, reviewers[1]);
   const applicant = await login(3001, reviewers[2]);
   const outsiderSession = await login(3001, outsider);
+  assert.equal((await request(3001, '/reviewer-status')).status, 401);
+  assert.deepEqual(await (await request(3001, '/reviewer-status', { cookie: reviewerOne.cookie })).json(), { eligible: true });
+  assert.deepEqual(await (await request(3001, '/reviewer-status', { cookie: outsiderSession.cookie })).json(), { eligible: false });
   const application = await request(3001, '/merchant-application', {
     method: 'POST', cookie: applicant.cookie, body: { proposed_name: 'Iduka Ryawe' },
   });
@@ -149,6 +152,7 @@ try {
 
   rotatedApi = startApi(3002, [reviewers[0].address, reviewers[1].address, outsider.address]);
   await waitForApi(3002, rotatedApi);
+  assert.deepEqual(await (await request(3002, '/reviewer-status', { cookie: outsiderSession.cookie })).json(), { eligible: true });
   assert.deepEqual(await (await request(3002, `/qr/${applicant.qr_reference}`)).json(),
     { account_kind: 'person', flow: 'person_transfer_preview' });
   assert.equal((await request(3002, `/merchant-products/${applicant.qr_reference}`)).status, 403);

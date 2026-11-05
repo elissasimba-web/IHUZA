@@ -4,6 +4,17 @@ import { createHash } from 'node:crypto';
 import { createMerchantReviewService } from './merchant_review.js';
 import { TESTNET_PASSPHRASE, WEB_ORIGIN } from './wallet.js';
 
+test('reviewer status is a server decision and malformed responses fail closed', async () => {
+  const wallet = { inspect: async () => ({ status: 'ready', address: 'G'.repeat(56) }) };
+  const eligible = createMerchantReviewService(wallet, async (url, options) => {
+    assert.equal(url, '/api/reviewer-status');
+    assert.equal(options.credentials, 'same-origin');
+    return { ok: true, json: async () => ({ eligible: true }) };
+  });
+  assert.equal(await eligible.status(), true);
+  const malformed = createMerchantReviewService(wallet, async () => ({ ok: true, json: async () => ({ eligible: 'true' }) }));
+  await assert.rejects(() => malformed.status());
+});
 const reference = 'a'.repeat(43);
 const address = 'G' + 'A'.repeat(55);
 const name = 'Iduka Ryawe';

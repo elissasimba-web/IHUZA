@@ -425,6 +425,34 @@ async fn reviewer_session(
     Ok((row.try_get("account_id").map_err(internal_error)?, address))
 }
 
+#[derive(Serialize)]
+struct ReviewerStatusResponse {
+    eligible: bool,
+}
+
+async fn reviewer_status(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<(HeaderMap, Json<ReviewerStatusResponse>), (StatusCode, Json<ErrorBody>)> {
+    let hash = session_hash(&headers)?;
+    let address: String = sqlx::query_scalar(
+        "SELECT w.stellar_address FROM account_sessions s JOIN wallet_links w ON w.account_id = s.account_id WHERE s.token_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > now() AND w.network_passphrase = $2",
+    )
+    .bind(hash.as_slice())
+    .bind(TESTNET_PASSPHRASE)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(internal_error)?
+    .ok_or_else(|| error(StatusCode::UNAUTHORIZED, "Session ntiyemewe."))?;
+    let eligible = state
+        .reviewers
+        .as_ref()
+        .is_some_and(|reviewers| reviewers.addresses.contains(&address));
+    let mut response_headers = HeaderMap::new();
+    response_headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    Ok((response_headers, Json(ReviewerStatusResponse { eligible })))
+}
+
 async fn logout(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -979,6 +1007,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/wallet/challenges", post(issue_challenge))
         .route("/api/wallet/proofs", post(verify_proof))
         .route("/api/session", get(read_session))
+        .route("/api/reviewer-status", get(reviewer_status))
         .route("/api/session/logout", post(logout))
         .route("/api/qr/{reference}", get(resolve_qr))
         .route(

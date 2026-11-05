@@ -449,6 +449,9 @@ a {
   border:1px solid #ffffff24;
   border-radius:10px
 }
+.reviewer-panel[hidden] {
+  display:none
+}
 .reviewer-panel summary {
   cursor:pointer;
   font-size:13px;

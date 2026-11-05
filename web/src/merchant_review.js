@@ -18,6 +18,13 @@ async function validMessage(review, address, now) {
 
 export function createMerchantReviewService(wallet, fetchImpl = fetch, now = () => Math.floor(Date.now() / 1000)) {
   return {
+    async status() {
+      const response = await fetchImpl('/api/reviewer-status', { credentials: 'same-origin', cache: 'no-store' });
+      if (!response.ok) throw new Error('reviewer status unavailable');
+      const result = await response.json();
+      if (typeof result?.eligible !== 'boolean') throw new Error('invalid reviewer status');
+      return result.eligible;
+    },
     async prepare(reference, address) {
       if (globalThis.location && globalThis.location.origin !== WEB_ORIGIN) throw new Error('invalid origin');
       if (!referencePattern.test(reference)) throw new Error('invalid reference');
