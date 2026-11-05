@@ -10,8 +10,8 @@ IHUZA+ ni umushinga wa serivisi z'imari n'iz'ubucuruzi ugenewe u Rwanda. Ubu iyi
 - `cargo test --locked --offline` yatsinze; `stellar contract build` yatanze Wasm. Nta contract yashyizwe kuri testnet cyangwa mainnet.
 - `scripts/check_stellar_testnet.ps1` ni read-only network probe; ntabwo ari payment integration.
 - `web/` ifite frontend ihuza Freighter wallet kandi ikemeza ko iri kuri Stellar testnet. Yerekana public address gusa; nta transaction ikora kandi nta konti ya IHUZA+ ihuzwa na wallet kugeza ubu.
-- `crates/wallet_proof` itanga nonce ya 256-bit ivuye muri OS RNG, ikanagenzura umukono wa SEP-53 kuri challenge ya Stellar testnet n'igihe imara. Nta server ibika challenge, kandi nta konti ihuzwa na wallet kugeza nonce ishobora gukoreshwa rimwe gusa mu buryo bwizewe. [Gahunda ya database nshya](docs/WEB3_DATA_PLAN.md) irategereje gusuzumwa.
-- `db/web3_testnet/001_identity.sql` ni migration ya testnet yageragejwe muri container y'igihe gito: yaremye tables 4, kandi yaranze database ifite izina ritari ryo. Nta database ihoraho iyi migration irakoreshwaho.
+- `crates/wallet_proof` itanga nonce ya 256-bit ivuye muri OS RNG, ikanagenzura umukono wa SEP-53 kuri challenge ya Stellar testnet n'igihe imara. Nta API irabika cyangwa ngo ikoreshe challenge, kandi nta konti ihuzwa na wallet kugeza nonce ishobora gukoreshwa rimwe gusa mu buryo bwizewe.
+- PostgreSQL database `ihuza_web3_testnet` iri muri container `ihuza-web3-postgres`; `db/web3_testnet/001_identity.sql` yashyizweho na `sqlx`, ikora tables 4. Irimo identity metadata gusa, nta wallet funds cyangwa payment records. Reba [gahunda ya database](docs/WEB3_DATA_PLAN.md).
 
 ## Ibyo project izubaka
 
@@ -19,7 +19,7 @@ Umukiriya azakoresha wallet yigenzurira, ascan-e **QR imwe ihoraho** ya konti y'
 
 Merchant Assistant izafasha umucuruzi kwandika suppliers, procurement, stock movements, ibicuruzwa, sales na reports. Ibyo byose n'inyandiko z'abakiriya bizabikwa mu buryo burinda amakuru yihariye; si ngombwa kubishyira kuri blockchain.
 
-Reba [ibyo twemeranyijwe ku bicuruzwa](docs/PRODUCT_REQUIREMENTS.md) n'[imyubakire ya tekiniki](docs/ARCHITECTURE.md). Iyi prototype ntikoresha database cyangwa API kugeza ubu.
+Reba [ibyo twemeranyijwe ku bicuruzwa](docs/PRODUCT_REQUIREMENTS.md) n'[imyubakire ya tekiniki](docs/ARCHITECTURE.md). Database schema irahari, ariko nta API iyikoresha kugeza ubu.
 
 ## Gutangira
 

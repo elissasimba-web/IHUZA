@@ -1,10 +1,10 @@
 # IHUZA+ — gahunda ya database nshya ya testnet
 
-Iyi ni gahunda yo gusuzuma mbere yo gushyiraho API cyangwa database ihoraho. `db/web3_testnet/001_identity.sql` yageragejwe muri container y'igihe gito, ariko **ntirakoreshwa kuri database ihoraho**.
+Iyi ni gahunda yo kubaka API na database ya Web3 testnet. `db/web3_testnet/001_identity.sql` yashyizwe muri `ihuza_web3_testnet` na `sqlx`; tables 4 zaremewe. Nta API cyangwa wallet-to-account binding irakorwa.
 
 ## Ahazubakwa
 
-- Database nshya yihariye, urugero `ihuza_web3_testnet`, ifite connection string yayo. Mainnet izakenera database n'amabwiriza byayo ukwabyo.
+- Database yihariye `ihuza_web3_testnet` ifite connection string yayo. Mainnet izakenera database n'amabwiriza byayo ukwabyo.
 - Umukoresha atangira yemeza ko afite urufunguzo rwa Stellar testnet address akoresheje SEP-53. Konti nshya n'ihuriro rya wallet bikorerwa muri transaction imwe nyuma yo kugenzura challenge. Konti iriho ishobora kongera kwinjira ikoresheje address imaze guhuzwa; uburyo bwo kongeramo indi wallet buzabanza kugira amabwiriza yihariye.
 - QR imwe ya konti igira random opaque reference itajya ivugururwa kubera guhindura wallet. Ntijyamo address, secret, igiciro cyangwa balance.
 
