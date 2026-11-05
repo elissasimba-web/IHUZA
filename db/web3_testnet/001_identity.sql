@@ -1,5 +1,5 @@
 -- IHUZA+ Web3 testnet only. Apply only to a NEW database named
--- ihuza_web3_testnet. Never apply to the historical ihuza database.
+-- ihuza_web3_testnet. The guard below rejects every other database.
 
 DO $$
 BEGIN

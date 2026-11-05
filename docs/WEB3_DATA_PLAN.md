@@ -1,6 +1,6 @@
 # IHUZA+ — gahunda ya database nshya ya testnet
 
-Iyi ni gahunda yo gusuzuma mbere yo gushyiraho API cyangwa database ihoraho. `db/web3_testnet/001_identity.sql` yageragejwe muri container y'igihe gito, ariko **ntirakoreshwa kuri database ihoraho**. Database ya kera `ihuza` n'amakuru yayo ntibikorwaho; nta balance ya kera iba amafaranga ya Stellar.
+Iyi ni gahunda yo gusuzuma mbere yo gushyiraho API cyangwa database ihoraho. `db/web3_testnet/001_identity.sql` yageragejwe muri container y'igihe gito, ariko **ntirakoreshwa kuri database ihoraho**.
 
 ## Ahazubakwa
 
@@ -27,5 +27,5 @@ Iyi ni gahunda yo gusuzuma mbere yo gushyiraho API cyangwa database ihoraho. `db
 ## Uko bizasuzumwa mbere yo gushyira migration mu bikorwa
 
 - Kwemeza model ya konti, recovery, merchant approval, n'uko wallet nyinshi zahuzwa na konti imwe.
-- Gusuzuma SQL migration nshya idahindura tables za kera; kuzigerageza kuri database nshya irimo ubusa, harimo concurrent proof attempts, replay, expiry na uniqueness.
-- Kugenzura backup/restore, connection permissions, rate limits, audit na failure recovery. Nta migration ya kera izasibwa cyangwa ngo yandikwe bushya.
+- Gusuzuma SQL migration nshya; kuyigerageza kuri database nshya irimo ubusa, harimo concurrent proof attempts, replay, expiry na uniqueness.
+- Kugenzura backup/restore, connection permissions, rate limits, audit na failure recovery.
