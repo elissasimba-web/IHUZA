@@ -35,6 +35,8 @@ const scanResult = document.querySelector('#scan-result');
 const merchantApplicationForm = document.querySelector('#merchant-application-form');
 const merchantApplicationStatus = document.querySelector('#merchant-application-status');
 const merchantName = document.querySelector('#merchant-name');
+const applicantName = document.querySelector('#applicant-name');
+const companyName = document.querySelector('#company-name');
 const reviewForm = document.querySelector('#review-form');
 const reviewReference = document.querySelector('#review-reference');
 const reviewPreview = document.querySelector('#review-preview');
@@ -118,7 +120,14 @@ async function refreshMerchantApplication() {
   try {
     const application = await merchantApplication.current();
     if (application) {
-      merchantApplicationStatus.textContent = application.status === 'approved'
+      if (application.status === 'needs_details') {
+        merchantName.value = application.proposed_name;
+        merchantName.readOnly = true;
+        merchantApplicationForm.hidden = false;
+      }
+      merchantApplicationStatus.textContent = application.status === 'needs_details'
+        ? 'Ubusabe bwa kera buracyakeneye izina ryawe n’irya company niba uyifite; busaba isuzuma rishya.'
+        : application.status === 'approved'
         ? `Ubusabe bwa “${application.proposed_name}” bwemejwe n’abasuzuma babiri. Ushobora gushyiraho ibicuruzwa; checkout ntirubakwa.`
         : `Ubusabe bwa “${application.proposed_name}” buracyasuzumwa. QR yawe iracyari iya konti isanzwe.`;
       if (application.status === 'approved' && !ownershipResult.hidden) {
@@ -335,7 +344,7 @@ merchantApplicationForm.addEventListener('submit', async (event) => {
   button.disabled = true;
   merchantApplicationStatus.textContent = 'Turabika ubusabe bwawe...';
   try {
-    const application = await merchantApplication.submit(merchantName.value.trim());
+    const application = await merchantApplication.submit(merchantName.value.trim(), applicantName.value.trim(), companyName.value.trim() || null);
     merchantApplicationForm.hidden = true;
     merchantApplicationStatus.textContent = `Ubusabe bwa “${application.proposed_name}” bwakiriwe. Buracyasuzumwa; checkout ntirafungurwa.`;
   } catch {
@@ -357,7 +366,7 @@ reviewForm.addEventListener('submit', async (event) => {
   try {
     const prepared = await merchantReview.prepare(reviewReference.value.trim(), activeAddress);
     activeReview = prepared;
-    reviewName.textContent = `Izina ryatanzwe: ${prepared.proposed_name}`;
+    reviewName.textContent = `Uwasabye: ${prepared.applicant_name}; ubucuruzi: ${prepared.proposed_name}; company: ${prepared.company_name ?? 'nta yo yatanzwe'}. Isuzuma rya testnet gusa.`;
     reviewMessage.textContent = prepared.message;
     reviewPreview.hidden = false;
     reviewReference.disabled = true;

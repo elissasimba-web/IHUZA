@@ -6,7 +6,7 @@ use axum::{
 };
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use ihuza_wallet_proof::{
-    valid_stellar_address, verify_challenge, Challenge, MerchantReview, TESTNET_PASSPHRASE,
+    valid_stellar_address, verify_challenge, Challenge, MerchantProfileReview, TESTNET_PASSPHRASE,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -541,17 +541,64 @@ async fn resolve_qr(
 #[serde(deny_unknown_fields)]
 struct MerchantApplicationRequest {
     proposed_name: String,
+    applicant_name: String,
+    company_name: Option<String>,
 }
 
 #[derive(Serialize)]
 struct MerchantApplicationResponse {
     proposed_name: String,
+    applicant_name: Option<String>,
+    company_name: Option<String>,
     status: &'static str,
 }
 
 fn valid_merchant_name(name: &str) -> bool {
     let length = name.chars().count();
     (2..=80).contains(&length) && name.trim() == name && !name.chars().any(char::is_control)
+}
+
+fn valid_profile_name(name: &str, max: usize) -> bool {
+    (2..=max).contains(&name.chars().count())
+        && name.trim() == name
+        && !name.chars().any(char::is_control)
+}
+
+struct MerchantProfile {
+    id: String,
+    account_id: String,
+    proposed_name: String,
+    applicant_name: String,
+    company_name: Option<String>,
+}
+
+fn profile_hash(profile: &MerchantProfile) -> String {
+    sha256_hex(&format!(
+        "{}\n{}\n{}\n{}\n{}",
+        profile.id,
+        profile.account_id,
+        profile.proposed_name,
+        profile.applicant_name,
+        profile.company_name.as_deref().unwrap_or("")
+    ))
+}
+
+async fn current_profile(
+    state: &AppState,
+    account_id: &str,
+) -> Result<Option<MerchantProfile>, (StatusCode, Json<ErrorBody>)> {
+    let row = sqlx::query("SELECT p.id::text AS profile_id, p.account_id::text AS account_id, m.proposed_name, p.applicant_name, p.company_name FROM merchant_profile_versions p JOIN merchant_applications m ON m.account_id = p.account_id WHERE p.account_id = $1::uuid ORDER BY p.version DESC LIMIT 1")
+        .bind(account_id).fetch_optional(&state.pool).await.map_err(internal_error)?;
+    row.map(|row| {
+        Ok(MerchantProfile {
+            id: row.try_get("profile_id").map_err(internal_error)?,
+            account_id: row.try_get("account_id").map_err(internal_error)?,
+            proposed_name: row.try_get("proposed_name").map_err(internal_error)?,
+            applicant_name: row.try_get("applicant_name").map_err(internal_error)?,
+            company_name: row.try_get("company_name").map_err(internal_error)?,
+        })
+    })
+    .transpose()
 }
 
 fn valid_product_name(name: &str) -> bool {
@@ -585,25 +632,28 @@ fn canonical_price(value: &str) -> Option<String> {
 async fn approval_count(
     state: &AppState,
     account_id: &str,
-    proposed_name: &str,
+    _proposed_name: &str,
 ) -> Result<usize, (StatusCode, Json<ErrorBody>)> {
     let Some(reviewers) = &state.reviewers else {
         return Ok(0);
     };
+    let Some(profile) = current_profile(state, account_id).await? else {
+        return Ok(0);
+    };
     let rows = sqlx::query(
-        "SELECT reviewer_address, name_hash, nonce_hex, signature_base64, extract(epoch from issued_at)::bigint AS issued_at, extract(epoch from expires_at)::bigint AS expires_at, extract(epoch from approved_at)::bigint AS approved_at FROM merchant_approval_votes WHERE account_id = $1::uuid AND reviewer_set_hash = $2",
+        "SELECT reviewer_address, profile_hash, nonce_hex, signature_base64, extract(epoch from issued_at)::bigint AS issued_at, extract(epoch from expires_at)::bigint AS expires_at, extract(epoch from approved_at)::bigint AS approved_at FROM merchant_profile_votes WHERE profile_id = $1::uuid AND reviewer_set_hash = $2",
     )
-    .bind(account_id)
+    .bind(&profile.id)
     .bind(&reviewers.hash)
     .fetch_all(&state.pool)
     .await
     .map_err(internal_error)?;
-    let expected_name_hash = sha256_hex(proposed_name);
+    let expected_profile_hash = profile_hash(&profile);
     let mut count = 0;
     for row in rows {
         let address: String = row.try_get("reviewer_address").map_err(internal_error)?;
-        let name_hash: String = row.try_get("name_hash").map_err(internal_error)?;
-        if !reviewers.addresses.contains(&address) || name_hash != expected_name_hash {
+        let stored_profile_hash: String = row.try_get("profile_hash").map_err(internal_error)?;
+        if !reviewers.addresses.contains(&address) || stored_profile_hash != expected_profile_hash {
             continue;
         }
         let issued_at: i64 = row.try_get("issued_at").map_err(internal_error)?;
@@ -616,10 +666,11 @@ async fn approval_count(
         ) else {
             continue;
         };
-        let review = MerchantReview {
+        let review = MerchantProfileReview {
             reviewer_address: address,
             account_id: account_id.to_owned(),
-            name_hash,
+            profile_id: profile.id.clone(),
+            profile_hash: stored_profile_hash,
             reviewer_set_hash: reviewers.hash.clone(),
             nonce_hex: row.try_get("nonce_hex").map_err(internal_error)?,
             issued_at,
@@ -636,6 +687,9 @@ async fn approval_count(
 #[derive(Serialize)]
 struct ReviewMessageResponse {
     proposed_name: String,
+    applicant_name: String,
+    company_name: Option<String>,
+    profile_id: String,
     nonce_hex: String,
     issued_at: u64,
     expires_at: u64,
@@ -646,7 +700,7 @@ async fn review_target(
     state: &AppState,
     reference: &str,
     reviewer_account_id: &str,
-) -> Result<(String, String), (StatusCode, Json<ErrorBody>)> {
+) -> Result<MerchantProfile, (StatusCode, Json<ErrorBody>)> {
     if reference.len() != 43
         || !reference
             .bytes()
@@ -666,10 +720,9 @@ async fn review_target(
     if account_id == reviewer_account_id {
         return Err(error(StatusCode::FORBIDDEN, "Kwiyemeza ntibyemewe."));
     }
-    Ok((
-        account_id,
-        row.try_get("proposed_name").map_err(internal_error)?,
-    ))
+    current_profile(state, &account_id)
+        .await?
+        .ok_or_else(|| error(StatusCode::CONFLICT, "Profile y'ubusabe ntiruzuzwa."))
 }
 
 async fn review_message(
@@ -679,16 +732,16 @@ async fn review_message(
 ) -> Result<(HeaderMap, Json<ReviewMessageResponse>), (StatusCode, Json<ErrorBody>)> {
     let reviewers = require_reviewer_set(&state)?;
     let (reviewer_account_id, reviewer_address) = reviewer_session(&state, &headers).await?;
-    let (account_id, proposed_name) =
-        review_target(&state, &reference, &reviewer_account_id).await?;
+    let profile = review_target(&state, &reference, &reviewer_account_id).await?;
     let issued_at = unix_now()?;
     let mut nonce = [0_u8; 32];
     getrandom::getrandom(&mut nonce)
         .map_err(|_| error(StatusCode::INTERNAL_SERVER_ERROR, "Randomness ntiboneka."))?;
-    let review = MerchantReview {
+    let review = MerchantProfileReview {
         reviewer_address,
-        account_id,
-        name_hash: sha256_hex(&proposed_name),
+        account_id: profile.account_id.clone(),
+        profile_id: profile.id.clone(),
+        profile_hash: profile_hash(&profile),
         reviewer_set_hash: reviewers.hash.clone(),
         nonce_hex: nonce.iter().map(|byte| format!("{byte:02x}")).collect(),
         issued_at,
@@ -699,7 +752,10 @@ async fn review_message(
     Ok((
         response_headers,
         Json(ReviewMessageResponse {
-            proposed_name,
+            proposed_name: profile.proposed_name,
+            applicant_name: profile.applicant_name,
+            company_name: profile.company_name,
+            profile_id: profile.id,
             nonce_hex: review.nonce_hex.clone(),
             issued_at,
             expires_at: review.expires_at,
@@ -736,12 +792,12 @@ async fn submit_review(
         return Err(error(StatusCode::BAD_REQUEST, "Umukono ntiwemewe."));
     }
     let (reviewer_account_id, reviewer_address) = reviewer_session(&state, &headers).await?;
-    let (account_id, proposed_name) =
-        review_target(&state, &reference, &reviewer_account_id).await?;
-    let review = MerchantReview {
+    let profile = review_target(&state, &reference, &reviewer_account_id).await?;
+    let review = MerchantProfileReview {
         reviewer_address: reviewer_address.clone(),
-        account_id: account_id.clone(),
-        name_hash: sha256_hex(&proposed_name),
+        account_id: profile.account_id.clone(),
+        profile_id: profile.id.clone(),
+        profile_hash: profile_hash(&profile),
         reviewer_set_hash: reviewers.hash.clone(),
         nonce_hex: input.nonce_hex,
         issued_at: input.issued_at,
@@ -754,12 +810,12 @@ async fn submit_review(
         ));
     }
     let inserted: Option<String> = sqlx::query_scalar(
-        "INSERT INTO merchant_approval_votes (account_id, reviewer_address, reviewer_set_hash, name_hash, nonce_hex, issued_at, expires_at, signature_base64) VALUES ($1::uuid, $2, $3, $4, $5, to_timestamp($6::double precision), to_timestamp($7::double precision), $8) ON CONFLICT DO NOTHING RETURNING id::text",
+        "INSERT INTO merchant_profile_votes (profile_id, reviewer_address, reviewer_set_hash, profile_hash, nonce_hex, issued_at, expires_at, signature_base64) VALUES ($1::uuid, $2, $3, $4, $5, to_timestamp($6::double precision), to_timestamp($7::double precision), $8) ON CONFLICT DO NOTHING RETURNING id::text",
     )
-    .bind(&account_id)
+    .bind(&profile.id)
     .bind(&reviewer_address)
     .bind(&review.reviewer_set_hash)
-    .bind(&review.name_hash)
+    .bind(&review.profile_hash)
     .bind(&review.nonce_hex)
     .bind(review.issued_at as i64)
     .bind(review.expires_at as i64)
@@ -770,7 +826,7 @@ async fn submit_review(
     if inserted.is_none() {
         return Err(error(StatusCode::CONFLICT, "Vote yamaze kubikwa."));
     }
-    let votes = approval_count(&state, &account_id, &proposed_name).await?;
+    let votes = approval_count(&state, &profile.account_id, &profile.proposed_name).await?;
     let mut response_headers = HeaderMap::new();
     response_headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     Ok((
@@ -796,7 +852,10 @@ async fn get_merchant_application(
     .await
     .map_err(internal_error)?
     .ok_or_else(|| error(StatusCode::NOT_FOUND, "Ubusabe ntibuboneka."))?;
-    let status = if approval_count(&state, &account_id, &proposed_name).await? >= 2 {
+    let profile = current_profile(&state, &account_id).await?;
+    let status = if profile.is_none() {
+        "needs_details"
+    } else if approval_count(&state, &account_id, &proposed_name).await? >= 2 {
         "approved"
     } else {
         "pending"
@@ -807,6 +866,8 @@ async fn get_merchant_application(
         response_headers,
         Json(MerchantApplicationResponse {
             proposed_name,
+            applicant_name: profile.as_ref().map(|p| p.applicant_name.clone()),
+            company_name: profile.and_then(|p| p.company_name),
             status,
         }),
     ))
@@ -819,19 +880,26 @@ async fn submit_merchant_application(
 ) -> Result<(StatusCode, HeaderMap, Json<MerchantApplicationResponse>), (StatusCode, Json<ErrorBody>)>
 {
     require_origin(&headers)?;
-    if !valid_merchant_name(&input.proposed_name) {
+    if !valid_merchant_name(&input.proposed_name)
+        || !valid_profile_name(&input.applicant_name, 100)
+        || input
+            .company_name
+            .as_ref()
+            .is_some_and(|name| !valid_profile_name(name, 120))
+    {
         return Err(error(
             StatusCode::BAD_REQUEST,
-            "Izina ry'ubucuruzi ntiryemewe.",
+            "Amazina yatanzwe ntiyemewe.",
         ));
     }
     let account_id = session_account_id(&state.pool, &headers).await?;
+    let mut tx = state.pool.begin().await.map_err(internal_error)?;
     let inserted: Option<String> = sqlx::query_scalar(
         "INSERT INTO merchant_applications (account_id, proposed_name) VALUES ($1::uuid, $2) ON CONFLICT (account_id) DO NOTHING RETURNING proposed_name",
     )
     .bind(&account_id)
     .bind(&input.proposed_name)
-    .fetch_optional(&state.pool)
+    .fetch_optional(&mut *tx)
     .await
     .map_err(internal_error)?;
     let (status, proposed_name) = if let Some(name) = inserted {
@@ -841,7 +909,7 @@ async fn submit_merchant_application(
             "SELECT proposed_name FROM merchant_applications WHERE account_id = $1::uuid",
         )
         .bind(&account_id)
-        .fetch_one(&state.pool)
+        .fetch_one(&mut *tx)
         .await
         .map_err(internal_error)?;
         if existing != input.proposed_name {
@@ -849,13 +917,32 @@ async fn submit_merchant_application(
         }
         (StatusCode::OK, existing)
     };
+    let inserted_profile: Option<String> = sqlx::query_scalar("INSERT INTO merchant_profile_versions (account_id, version, applicant_name, company_name) VALUES ($1::uuid, 1, $2, $3) ON CONFLICT (account_id, version) DO NOTHING RETURNING id::text")
+        .bind(&account_id).bind(&input.applicant_name).bind(&input.company_name)
+        .fetch_optional(&mut *tx).await.map_err(internal_error)?;
+    let profile_row = sqlx::query("SELECT applicant_name, company_name FROM merchant_profile_versions WHERE account_id = $1::uuid AND version = 1")
+        .bind(&account_id).fetch_one(&mut *tx).await.map_err(internal_error)?;
+    let applicant_name: String = profile_row
+        .try_get("applicant_name")
+        .map_err(internal_error)?;
+    let company_name: Option<String> = profile_row
+        .try_get("company_name")
+        .map_err(internal_error)?;
+    if applicant_name != input.applicant_name || company_name != input.company_name {
+        return Err(error(StatusCode::CONFLICT, "Profile isanzwe iriho."));
+    }
+    tx.commit().await.map_err(internal_error)?;
     let application_status = if approval_count(&state, &account_id, &proposed_name).await? >= 2 {
         "approved"
     } else {
         "pending"
     };
     Ok((
-        status,
+        if inserted_profile.is_some() {
+            StatusCode::CREATED
+        } else {
+            status
+        },
         {
             let mut headers = HeaderMap::new();
             headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
@@ -863,6 +950,8 @@ async fn submit_merchant_application(
         },
         Json(MerchantApplicationResponse {
             proposed_name,
+            applicant_name: Some(applicant_name),
+            company_name,
             status: application_status,
         }),
     ))

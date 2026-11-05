@@ -98,7 +98,7 @@ try {
   assert.deepEqual(await (await request(3001, '/reviewer-status', { cookie: reviewerOne.cookie })).json(), { eligible: true });
   assert.deepEqual(await (await request(3001, '/reviewer-status', { cookie: outsiderSession.cookie })).json(), { eligible: false });
   const application = await request(3001, '/merchant-application', {
-    method: 'POST', cookie: applicant.cookie, body: { proposed_name: 'Iduka Ryawe' },
+    method: 'POST', cookie: applicant.cookie, body: { proposed_name: 'Iduka Ryawe', applicant_name: 'Aline Uwase', company_name: 'Iduka Ltd' },
   });
   assert.equal(application.status, 201);
   assert.equal((await request(3001, '/merchant-products', { method: 'POST', cookie: applicant.cookie,
@@ -112,6 +112,8 @@ try {
   assert.equal(firstMessage.status, 200);
   const first = await firstMessage.json();
   assert.equal(first.proposed_name, 'Iduka Ryawe');
+  assert.equal(first.applicant_name, 'Aline Uwase');
+  assert.equal(first.company_name, 'Iduka Ltd');
   assert.ok(first.message.includes('decision: approve\n'));
   const firstBody = { nonce_hex: first.nonce_hex, issued_at: first.issued_at, expires_at: first.expires_at,
     signature_base64: signature(first.message, reviewers[0].privateKey) };
@@ -136,7 +138,7 @@ try {
   assert.deepEqual(await (await request(3001, `/qr/${applicant.qr_reference}`)).json(),
     { account_kind: 'merchant', flow: 'unavailable' });
   assert.deepEqual(await (await request(3001, '/merchant-application', { cookie: applicant.cookie })).json(),
-    { proposed_name: 'Iduka Ryawe', status: 'approved' });
+    { proposed_name: 'Iduka Ryawe', applicant_name: 'Aline Uwase', company_name: 'Iduka Ltd', status: 'approved' });
   assert.equal((await request(3001, '/merchant-products', { method: 'POST', cookie: applicant.cookie,
     body: { name: 'Umuceri', unit_price: '0.00' } })).status, 400);
   assert.equal((await request(3001, '/merchant-products', { method: 'POST', cookie: reviewerOne.cookie,

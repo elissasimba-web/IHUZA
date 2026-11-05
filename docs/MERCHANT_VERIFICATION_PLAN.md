@@ -1,36 +1,24 @@
-# IHUZA+ — merchant verification ya testnet
+# IHUZA+ — merchant profile ya testnet
 
-Iyi plan ishingiye ku byo nyiri project yemeje: izina ry'ubucuruzi, uwabusabye, aho bukorera, nimero y'iyandikisha cyangwa TIN, n'izina ryemewe rya company iyo ari company. Delivery no gutumiza mu gihugu bizagira policy yihariye nyuma; ntibifungurwa n'iyi verification. Iyi ni prototype ya testnet, si ukwemezwa na RDB/RRA cyangwa impushya zo kwakira amafaranga nyayo.
+Nyiri project yahisemo koroshya merchant registration ya testnet: izina ry'uwasabye, izina ry'ubucuruzi, n'izina rya company niba ayifite. Nta TIN, nimero y'iyandikisha, certificate, ID scan cyangwa KYC bisabwa ku mucuruzi usanzwe muri iyi prototype. Reviewer approval ya 2-of-3 yemeza **profile yatanzwe kuri testnet gusa**; ntivuga ko ubucuruzi bwemejwe na RDB/RRA.
 
-## Ibyo merchant atanga
+Delivery no gutumiza ibicuruzwa imbere mu gihugu bizasaba company yanditswe n'isuzuma rya KYC ryihariye igihe icyo gice kizubakwa. Nta delivery flow ifungurwa na merchant approval isanzwe. TIN, ibyangombwa byemewe n'uburyo bwo kubihuza na EBM bizategurwa igihe EBM integration yemewe izubakwa. Nta EBM integration iriho ubu.
 
-1. Izina rigaragara ku bakiriya (`display_name`, riri muri `merchant_applications.proposed_name`).
-2. Ubwoko bw'ubucuruzi: individual enterprise cyangwa registered company. Company itanga `registered_company_name`; individual enterprise ntisabwa guhimba izina rya company.
-3. Izina ry'uwasabye (`applicant_name`) n'aho ubucuruzi bukorera (`operating_location`). Ibi ntibijya muri QR cyangwa public catalog.
-4. Nimero y'iyandikisha / TIN imwe, yanditswe uko iri ku cyemezo cy'iyandikisha. Nta “TIN certificate” ya kabiri isabwa kuri company yanditswe. Reviewer agomba kugenzura ko nimero n'izina bihura n'icyemezo.
-5. Uko kopi y'icyemezo (PDF/ifoto) yatangwa muri system cyangwa igenzurwa hanze yayo biracyategereje icyemezo cya nyiri project. Nta file upload izongerwa tutarategura uburenganzira bwo kuyisoma, uburyo bwo kuyibika n'igihe izamura.
+## Migration 006: plan yasuzumwe mbere yo kuyikoresha
 
-## Ingaruka kuri approval iriho
+- Ongera `merchant_profile_versions` muri `ihuza_web3_testnet` gusa: `id`, `account_id`, `version`, `applicant_name`, `company_name` ishobora kubura, `created_at`. `merchant_applications.proposed_name` iguma ari izina ry'ubucuruzi. Nta table ya kera ihindurwa cyangwa ngo isibwe. Profile ya mbere iba version 1; guhindura amakuru nyuma bizasaba version nshya n'isuzuma rishya, ntihindura iyashize.
+- Ongera `merchant_profile_votes` ya append-only ifite umukono wa reviewer, profile ID na digest y'izina ry'ubucuruzi n'andi mazina, reviewer set digest, nonce n'igihe. Runtime database role ihabwa `SELECT/INSERT` gusa. Migration igira guard ya database ya testnet.
+- Votes za `004_merchant_approval_votes.sql` zasinyiraga izina gusa. Zisigara mu mateka ariko **ntizongera gufungura merchant QR cyangwa catalog**. Konti ifite application ya kera ishobora kuzuza profile ya version 1, igategereza votes nshya 2 muri 3. QR reference imwe ihoraho ntihinduka.
+- API ikura account ID muri session, ikagenzura amazina n'uko company name itangwa iyo ihari. Owner na reviewer wemewe gusa ni bo basoma applicant/company names; public QR/catalog ntibisohora ayo makuru. Reviewer abona amazina mbere yo gusinya ubutumwa bushya bwa SEP-53 butandukanye n'ubwa kera.
+- Nta wallet seed, payment, transaction hash, EBM cyangwa delivery authorization muri iyi migration.
 
-Votes zo muri `merchant_approval_votes` zasinyiraga izina gusa. Ntizishobora kwitirirwa ko zagenzuye nimero, company name, aho bukorera cyangwa certificate. Migration nshya izaba additive; ntihindura `003`/`004` yashyizweho. Igihe verification nshya izatangira, approval ya catalog/merchant QR izasaba **votes nshya 2 muri 3** ziboshye kuri digest y'amakuru n'ibimenyetso byasuzumwe. Konti idafite ibyo bimenyetso izaba `pending` (fail closed). QR reference imwe ntihinduka. Nta wallet seed, payment cyangwa transaction hash muri verification.
+## Igenzura
 
-## Privacy na audit
+1. Mbere yo `-Apply`: suzuma SQL, database guard, permissions na `git diff --check`; wemeze ko migration 001–005 zidahinduwe.
+2. Nyuma: genzura migration info, old application ishobora kongeraho profile, old vote ntikora, unauthorized read/write, company optional, duplicate/mismatch, self-approval, quorum, replay, reviewer rotation na QR/catalog fail closed.
+3. UI igomba kwerekana neza ko `approved` ari approval ya testnet profile, si KYC cyangwa EBM.
 
-- Application owner na reviewer wemewe ni bo gusa basoma amakuru y'ubucuruzi atari public. Public QR resolver itanga status gusa. API ntisohora nimero y'iyandikisha/TIN mu QR cyangwa public catalog.
-- Reviewer abanza kureba izina n'amakuru agiye kwemeza, hanyuma agasinyira ubutumwa bwa SEP-53 burimo application digest, network, decision, nonce n'igihe. Umukono umwe = vote imwe; 2 muri 3 ni zo zemeza kuri testnet.
-- Gukosora amakuru nyuma ya votes bisaba version nshya n'isuzuma rishya; ntihindura ibyagezweho bucece. Rejection, suspension, appeal n'igihe ibyangombwa bibikwa bizasobanurwa mbere yo gufungura ayo ma flows.
-- Delivery / ordering bizasaba company yanditswe n'ibyangombwa byayo hakurikijwe policy izemezwa igihe icyo gice kizubakwa. Merchant verification y'ibanze ntiyihita itanga uburenganzira bwa delivery.
-- Amakuru y'iyandikisha ashobora gufasha mapping ya EBM mu gihe izaba yahujwe byemewe; ubu nta EBM integration cyangwa fagitire ya EBM bihari.
+## Amasoko yo guteguraho EBM/KYC nyuma
 
-## Gahunda yo gushyira mu bikorwa
-
-1. Emeza niba kopi y'icyemezo izabikwa muri IHUZA+ cyangwa izagenzurwa n'abasuzuma hanze ya system. Hitamo aho ibikwa, access na retention niba izoherezwa.
-2. Andika migration nshya ya testnet y'ibyemezo n'amateka ya versions, uyisuzume mbere yo kuyikoresha. Reba ko database ari `ihuza_web3_testnet` kandi ko role ya API ifite uburenganzira buke.
-3. Ongera form ya merchant, reviewer preview, signature ya version nshya, na approval gating. Votes za kera zigume mu mateka ariko ntizemererwe gufungura merchant status nshya.
-4. Gerageza missing/invalid fields, company vs individual, unauthorized reads, self approval, quorum, replay, changed evidence, old votes, reviewer rotation na QR/catalog fail closed.
-
-## Amasoko y'igenzura
-
-- RDB/ORG: https://org.rdb.rw/business-registration/ — registration ya company n'individual enterprise.
-- RDB/ORG requirements: https://org.rdb.rw/business-registration/requirements/ — ibisabwa biratandukana bitewe n'ubwoko bw'ubucuruzi.
-- RRA: https://www.rra.gov.rw/fileadmin/user_upload/announce/itangazo_tin_17_feb.pdf — registration certificate ya company yanditswe irimo TIN; ntisaba certificate ya TIN itandukanye.
+- RDB/ORG: https://org.rdb.rw/business-registration/ — registered company n'individual enterprise ni ibyiciro bitandukanye.
+- RRA: https://www.rra.gov.rw/fileadmin/user_upload/announce/itangazo_tin_17_feb.pdf — certificate ya company yanditswe irimo TIN; ntisaba TIN certificate itandukanye.

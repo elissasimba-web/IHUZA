@@ -1,6 +1,8 @@
 # IHUZA+ — gahunda ya database nshya ya testnet
 
-Iyi ni gahunda n'amateka yo kubaka API na database ya Web3 testnet. Migrations `001_identity.sql` kugeza kuri `005_merchant_products.sql` zashyizwe muri `ihuza_web3_testnet` na `sqlx`. API ya localhost itanga challenge ikanagenzura proof, ikarema cyangwa igasoma konti muri transaction, ikanatanga session. Frontend ihuza Freighter kuri iyo API. `003` ibika merchant applications, `004` ikabika votes za reviewers, `005` ikabika catalog n'ibiciro byanditswe n'umucuruzi; nta payment cyangwa wallet funds bibikwa hano.
+Migration `006_merchant_profile_versions.sql` yongeraho profile versions na votes zibohwa kuri profile yose. `004` votes z'izina rimwe ziguma mu mateka gusa. Merchant usanzwe atanga amazina y'ibanze; KYC ya delivery na EBM ntibirubakwa.
+
+Iyi ni gahunda n'amateka yo kubaka API na database ya Web3 testnet. Migrations `001_identity.sql` kugeza kuri `006_merchant_profile_versions.sql` zashyizwe muri `ihuza_web3_testnet` na `sqlx`. API ya localhost itanga challenge ikanagenzura proof, ikarema cyangwa igasoma konti muri transaction, ikanatanga session. Frontend ihuza Freighter kuri iyo API. `003` ibika merchant applications, `004` ikabika votes za reviewers, `005` ikabika catalog n'ibiciro byanditswe n'umucuruzi; nta payment cyangwa wallet funds bibikwa hano.
 
 ## Gahunda yasuzumwe ya `002_sessions.sql`
 
@@ -18,7 +20,7 @@ Iyi ni gahunda n'amateka yo kubaka API na database ya Web3 testnet. Migrations `
 
 ## Ahazubakwa
 
-- Approval ya testnet: reviewer public addresses eshatu zitandukanye muri config; umukono wa SEP-53 kuri application, izina, reviewer set, nonce n'igihe. Votes ebyiri mu itsinda ririho zigaragaza merchant status, ariko checkout irafunze. Reba `docs/MERCHANT_APPROVAL_PLAN.md`.
+- Approval ya testnet: reviewer public addresses eshatu zitandukanye muri config; umukono wa SEP-53 kuri profile version yose, reviewer set, nonce n'igihe. Votes ebyiri mu itsinda ririho zigaragaza merchant status, ariko checkout irafunze. Reba `docs/MERCHANT_APPROVAL_PLAN.md`.
 
 - Database yihariye `ihuza_web3_testnet` ifite connection string yayo. Mainnet izakenera database n'amabwiriza byayo ukwabyo.
 - Umukoresha atangira yemeza ko afite urufunguzo rwa Stellar testnet address akoresheje SEP-53. Konti nshya n'ihuriro rya wallet bikorerwa muri transaction imwe nyuma yo kugenzura challenge. Konti iriho ishobora kongera kwinjira ikoresheje address imaze guhuzwa; uburyo bwo kongeramo indi wallet buzabanza kugira amabwiriza yihariye.

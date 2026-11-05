@@ -443,6 +443,18 @@ a {
   margin-bottom:8px;
   font-size:12px
 }
+.merchant-application-panel form > input {
+  display:block;
+  width:100%;
+  box-sizing:border-box;
+  margin-bottom:14px;
+  padding:12px 14px;
+  border:1px solid #ffffff40;
+  border-radius:10px;
+  background:#071a25;
+  color:#e9f4f4;
+  font:inherit
+}
 .reviewer-panel {
   margin:18px 0;
   padding:16px;

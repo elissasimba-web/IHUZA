@@ -78,7 +78,7 @@ test('message signing checks the signer, network and wallet before and after app
 });
 
 test('merchant review has a separate explicit message and signer check', async () => {
-  const message = `IHUZA+ merchant review\nversion: 1\norigin: ${WEB_ORIGIN}\npurpose: approve merchant application only; no payment\nnetwork: ${TESTNET_PASSPHRASE}\nreviewer: ${address}\naccount: 11111111-1111-4111-8111-111111111111\nname_sha256: ${'a'.repeat(64)}\nreviewer_set_sha256: ${'b'.repeat(64)}\ndecision: approve\nnonce: ${'c'.repeat(64)}\nissued_at: 1000\nexpires_at: 1300`;
+  const message = `IHUZA+ merchant profile review\nversion: 2\norigin: ${WEB_ORIGIN}\npurpose: approve testnet merchant profile only; no KYC or payment\nnetwork: ${TESTNET_PASSPHRASE}\nreviewer: ${address}\naccount: 11111111-1111-4111-8111-111111111111\nprofile: 22222222-2222-4222-8222-222222222222\nprofile_sha256: ${'a'.repeat(64)}\nreviewer_set_sha256: ${'b'.repeat(64)}\ndecision: approve\nnonce: ${'c'.repeat(64)}\nissued_at: 1000\nexpires_at: 1300`;
   let signCalls = 0;
   const wallet = createWalletService(fakeApi({ signMessage: async () => {
     signCalls++;

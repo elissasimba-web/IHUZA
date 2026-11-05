@@ -18,11 +18,14 @@ test('reviewer status is a server decision and malformed responses fail closed',
 const reference = 'a'.repeat(43);
 const address = 'G' + 'A'.repeat(55);
 const name = 'Iduka Ryawe';
-const hash = createHash('sha256').update(name).digest('hex');
+const accountId = '11111111-1111-4111-8111-111111111111';
+const profileId = '22222222-2222-4222-8222-222222222222';
+const hash = createHash('sha256').update([profileId, accountId, name, 'Aline Uwase', 'Iduka Ltd'].join('\n')).digest('hex');
 const review = {
   proposed_name: name,
+  applicant_name: 'Aline Uwase', company_name: 'Iduka Ltd', profile_id: profileId,
   nonce_hex: 'b'.repeat(64), issued_at: 1000, expires_at: 1300,
-  message: `IHUZA+ merchant review\nversion: 1\norigin: ${WEB_ORIGIN}\npurpose: approve merchant application only; no payment\nnetwork: ${TESTNET_PASSPHRASE}\nreviewer: ${address}\naccount: 11111111-1111-4111-8111-111111111111\nname_sha256: ${hash}\nreviewer_set_sha256: ${'c'.repeat(64)}\ndecision: approve\nnonce: ${'b'.repeat(64)}\nissued_at: 1000\nexpires_at: 1300`,
+  message: `IHUZA+ merchant profile review\nversion: 2\norigin: ${WEB_ORIGIN}\npurpose: approve testnet merchant profile only; no KYC or payment\nnetwork: ${TESTNET_PASSPHRASE}\nreviewer: ${address}\naccount: ${accountId}\nprofile: ${profileId}\nprofile_sha256: ${hash}\nreviewer_set_sha256: ${'c'.repeat(64)}\ndecision: approve\nnonce: ${'b'.repeat(64)}\nissued_at: 1000\nexpires_at: 1300`,
 };
 const wallet = { inspect: async () => ({ status: 'ready', address }), signMerchantReview: async () => ({ status: 'signed', signature_base64: 'x'.repeat(88) }) };
 
@@ -46,6 +49,10 @@ test('changed name hash or expired review cannot be signed', async () => {
   const protectedWallet = { ...wallet, signMerchantReview: async () => { signed = true; return {}; } };
   const changed = createMerchantReviewService(protectedWallet, async () => ({ ok: true, json: async () => ({ ...review, proposed_name: 'Irindi Duka' }) }), () => 1100);
   await assert.rejects(() => changed.prepare(reference, address));
+  const changedApplicant = createMerchantReviewService(protectedWallet, async () => ({ ok: true, json: async () => ({ ...review, applicant_name: 'Irindi Zina' }) }), () => 1100);
+  await assert.rejects(() => changedApplicant.prepare(reference, address));
+  const changedCompany = createMerchantReviewService(protectedWallet, async () => ({ ok: true, json: async () => ({ ...review, company_name: null }) }), () => 1100);
+  await assert.rejects(() => changedCompany.prepare(reference, address));
   const expired = createMerchantReviewService(protectedWallet, async () => ({ ok: true, json: async () => review }), () => 1300);
   await assert.rejects(() => expired.prepare(reference, address));
   assert.equal(signed, false);

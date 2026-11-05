@@ -161,6 +161,48 @@ impl MerchantReview {
     }
 }
 
+/// A testnet reviewer vote bound to one immutable merchant profile version.
+/// It is neither legal KYC nor payment authorization.
+pub struct MerchantProfileReview {
+    pub reviewer_address: String,
+    pub account_id: String,
+    pub profile_id: String,
+    pub profile_hash: String,
+    pub reviewer_set_hash: String,
+    pub nonce_hex: String,
+    pub issued_at: u64,
+    pub expires_at: u64,
+}
+
+impl MerchantProfileReview {
+    pub fn message(&self) -> String {
+        format!(
+            "IHUZA+ merchant profile review\nversion: 2\norigin: {WEB_ORIGIN}\npurpose: approve testnet merchant profile only; no KYC or payment\nnetwork: {TESTNET_PASSPHRASE}\nreviewer: {}\naccount: {}\nprofile: {}\nprofile_sha256: {}\nreviewer_set_sha256: {}\ndecision: approve\nnonce: {}\nissued_at: {}\nexpires_at: {}",
+            self.reviewer_address,
+            self.account_id,
+            self.profile_id,
+            self.profile_hash,
+            self.reviewer_set_hash,
+            self.nonce_hex,
+            self.issued_at,
+            self.expires_at
+        )
+    }
+
+    pub fn verify(&self, now: u64, signature_base64: &str) -> bool {
+        valid_stellar_address(&self.reviewer_address)
+            && lowercase_hex_64(&self.profile_hash)
+            && lowercase_hex_64(&self.reviewer_set_hash)
+            && lowercase_hex_64(&self.nonce_hex)
+            && self.issued_at > 0
+            && self.expires_at > self.issued_at
+            && self.expires_at - self.issued_at <= MAX_LIFETIME_SECONDS
+            && now >= self.issued_at
+            && now < self.expires_at
+            && verify_sep53(&self.reviewer_address, &self.message(), signature_base64)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -250,6 +292,35 @@ mod tests {
         assert_ne!(
             review.message(),
             Challenge::issue(ADDRESS, 1000).unwrap().message()
+        );
+    }
+
+    #[test]
+    fn profile_review_cannot_reuse_name_only_signature() {
+        let review = MerchantProfileReview {
+            reviewer_address: ADDRESS.to_owned(),
+            account_id: "11111111-1111-4111-8111-111111111111".to_owned(),
+            profile_id: "22222222-2222-4222-8222-222222222222".to_owned(),
+            profile_hash: "a".repeat(64),
+            reviewer_set_hash: "b".repeat(64),
+            nonce_hex: "c".repeat(64),
+            issued_at: 1000,
+            expires_at: 1300,
+        };
+        assert!(review.message().contains("no KYC or payment"));
+        assert!(!review.verify(1300, "bad"));
+        assert_ne!(
+            review.message(),
+            MerchantReview {
+                reviewer_address: ADDRESS.to_owned(),
+                account_id: review.account_id.clone(),
+                name_hash: "a".repeat(64),
+                reviewer_set_hash: "b".repeat(64),
+                nonce_hex: "c".repeat(64),
+                issued_at: 1000,
+                expires_at: 1300,
+            }
+            .message()
         );
     }
 }

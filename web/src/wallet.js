@@ -27,22 +27,24 @@ export function parseOwnershipMessage(message, address) {
 export function parseMerchantReviewMessage(message, address) {
   if (typeof message !== 'string' || !addressIsPlausible(address)) return null;
   const lines = message.split('\n');
-  if (lines.length !== 13 || lines[0] !== 'IHUZA+ merchant review' || lines[1] !== 'version: 1') return null;
-  if (lines[2] !== `origin: ${WEB_ORIGIN}` || lines[3] !== 'purpose: approve merchant application only; no payment') return null;
+  if (lines.length !== 14 || lines[0] !== 'IHUZA+ merchant profile review' || lines[1] !== 'version: 2') return null;
+  if (lines[2] !== `origin: ${WEB_ORIGIN}` || lines[3] !== 'purpose: approve testnet merchant profile only; no KYC or payment') return null;
   if (lines[4] !== `network: ${TESTNET_PASSPHRASE}` || lines[5] !== `reviewer: ${address}`) return null;
   if (!/^account: [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(lines[6])) return null;
-  if (!/^name_sha256: [0-9a-f]{64}$/.test(lines[7]) || !/^reviewer_set_sha256: [0-9a-f]{64}$/.test(lines[8])) return null;
-  if (lines[9] !== 'decision: approve' || !/^nonce: [0-9a-f]{64}$/.test(lines[10])) return null;
-  if (!/^issued_at: [0-9]+$/.test(lines[11]) || !/^expires_at: [0-9]+$/.test(lines[12])) return null;
-  const issued_at = Number(lines[11].slice('issued_at: '.length));
-  const expires_at = Number(lines[12].slice('expires_at: '.length));
+  if (!/^profile: [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(lines[7])) return null;
+  if (!/^profile_sha256: [0-9a-f]{64}$/.test(lines[8]) || !/^reviewer_set_sha256: [0-9a-f]{64}$/.test(lines[9])) return null;
+  if (lines[10] !== 'decision: approve' || !/^nonce: [0-9a-f]{64}$/.test(lines[11])) return null;
+  if (!/^issued_at: [0-9]+$/.test(lines[12]) || !/^expires_at: [0-9]+$/.test(lines[13])) return null;
+  const issued_at = Number(lines[12].slice('issued_at: '.length));
+  const expires_at = Number(lines[13].slice('expires_at: '.length));
   if (!Number.isSafeInteger(issued_at) || !Number.isSafeInteger(expires_at) ||
       issued_at <= 0 || expires_at <= issued_at || expires_at - issued_at > 300) return null;
   return {
     account_id: lines[6].slice('account: '.length),
-    name_hash: lines[7].slice('name_sha256: '.length),
-    reviewer_set_hash: lines[8].slice('reviewer_set_sha256: '.length),
-    nonce_hex: lines[10].slice('nonce: '.length),
+    profile_id: lines[7].slice('profile: '.length),
+    profile_hash: lines[8].slice('profile_sha256: '.length),
+    reviewer_set_hash: lines[9].slice('reviewer_set_sha256: '.length),
+    nonce_hex: lines[11].slice('nonce: '.length),
     issued_at,
     expires_at,
   };

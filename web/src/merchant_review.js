@@ -2,17 +2,19 @@ import { parseMerchantReviewMessage, WEB_ORIGIN } from './wallet.js';
 
 const referencePattern = /^[A-Za-z0-9_-]{43}$/;
 
-async function nameHash(name) {
-  const bytes = new TextEncoder().encode(name);
+async function profileHash(review, parsed) {
+  const bytes = new TextEncoder().encode([parsed.profile_id, parsed.account_id, review.proposed_name, review.applicant_name, review.company_name ?? ''].join('\n'));
   const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes);
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
 async function validMessage(review, address, now) {
-  if (!review || typeof review.proposed_name !== 'string' || review.proposed_name.length < 2 || review.proposed_name.length > 80) return null;
+  if (!review || typeof review.proposed_name !== 'string' || review.proposed_name.length < 2 || review.proposed_name.length > 80 ||
+      typeof review.applicant_name !== 'string' || review.applicant_name.length < 2 || review.applicant_name.length > 100 ||
+      (review.company_name !== null && (typeof review.company_name !== 'string' || review.company_name.length < 2 || review.company_name.length > 120))) return null;
   const parsed = parseMerchantReviewMessage(review.message, address);
   if (!parsed || parsed.nonce_hex !== review.nonce_hex || parsed.issued_at !== review.issued_at || parsed.expires_at !== review.expires_at) return null;
-  if (now < parsed.issued_at || now >= parsed.expires_at || parsed.name_hash !== await nameHash(review.proposed_name)) return null;
+  if (parsed.profile_id !== review.profile_id || now < parsed.issued_at || now >= parsed.expires_at || parsed.profile_hash !== await profileHash(review, parsed)) return null;
   return parsed;
 }
 
