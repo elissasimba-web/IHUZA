@@ -8,6 +8,17 @@ pub const WEB_ORIGIN: &str = "http://127.0.0.1:5173";
 const SEP53_PREFIX: &[u8] = b"Stellar Signed Message:\n";
 const MAX_LIFETIME_SECONDS: u64 = 300;
 
+pub fn valid_stellar_address(address: &str) -> bool {
+    PublicKey::from_string(address).is_ok()
+}
+
+fn lowercase_hex_64(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
 /// A server-issued challenge. The server must store it for one wallet login or
 /// account-link attempt and consume it atomically before granting access.
 pub struct Challenge {
@@ -28,7 +39,7 @@ impl Challenge {
     /// Creates a fresh five-minute testnet challenge using the operating system RNG.
     /// The server must persist it for one attempt before returning it.
     pub fn issue(address: &str, issued_at: u64) -> Result<Self, IssueError> {
-        if PublicKey::from_string(address).is_err() {
+        if !valid_stellar_address(address) {
             return Err(IssueError::InvalidAddress);
         }
         if issued_at == 0 || issued_at.checked_add(MAX_LIFETIME_SECONDS).is_none() {
@@ -106,6 +117,50 @@ pub fn verify_challenge(
     Ok(())
 }
 
+/// A reviewer's explicit off-chain approval of one merchant application.
+/// This signature is not a Stellar payment or full multisig authorization.
+pub struct MerchantReview {
+    pub reviewer_address: String,
+    pub account_id: String,
+    pub name_hash: String,
+    pub reviewer_set_hash: String,
+    pub nonce_hex: String,
+    pub issued_at: u64,
+    pub expires_at: u64,
+}
+
+impl MerchantReview {
+    pub fn message(&self) -> String {
+        format!(
+            "IHUZA+ merchant review\nversion: 1\norigin: {WEB_ORIGIN}\npurpose: approve merchant application only; no payment\nnetwork: {TESTNET_PASSPHRASE}\nreviewer: {}\naccount: {}\nname_sha256: {}\nreviewer_set_sha256: {}\ndecision: approve\nnonce: {}\nissued_at: {}\nexpires_at: {}",
+            self.reviewer_address,
+            self.account_id,
+            self.name_hash,
+            self.reviewer_set_hash,
+            self.nonce_hex,
+            self.issued_at,
+            self.expires_at
+        )
+    }
+
+    pub fn valid_at(&self, now: u64) -> bool {
+        valid_stellar_address(&self.reviewer_address)
+            && lowercase_hex_64(&self.name_hash)
+            && lowercase_hex_64(&self.reviewer_set_hash)
+            && lowercase_hex_64(&self.nonce_hex)
+            && self.issued_at > 0
+            && self.expires_at > self.issued_at
+            && self.expires_at - self.issued_at <= MAX_LIFETIME_SECONDS
+            && now >= self.issued_at
+            && now < self.expires_at
+    }
+
+    pub fn verify(&self, now: u64, signature_base64: &str) -> bool {
+        self.valid_at(now)
+            && verify_sep53(&self.reviewer_address, &self.message(), signature_base64)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -174,5 +229,27 @@ mod tests {
             Challenge::issue(ADDRESS, u64::MAX),
             Err(IssueError::InvalidTime)
         ));
+    }
+
+    #[test]
+    fn merchant_review_message_is_distinct_from_wallet_login() {
+        let review = MerchantReview {
+            reviewer_address: ADDRESS.to_owned(),
+            account_id: "11111111-1111-4111-8111-111111111111".to_owned(),
+            name_hash: "a".repeat(64),
+            reviewer_set_hash: "b".repeat(64),
+            nonce_hex: "c".repeat(64),
+            issued_at: 1000,
+            expires_at: 1300,
+        };
+        assert!(review.valid_at(1000));
+        assert!(!review.valid_at(1300));
+        assert!(review
+            .message()
+            .contains("purpose: approve merchant application only; no payment"));
+        assert_ne!(
+            review.message(),
+            Challenge::issue(ADDRESS, 1000).unwrap().message()
+        );
     }
 }

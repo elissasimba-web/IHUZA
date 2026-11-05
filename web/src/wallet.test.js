@@ -76,3 +76,16 @@ test('message signing checks the signer, network and wallet before and after app
   assert.equal((await restricted.signChallenge({ address, message: 'Please sign a transaction' })).status, 'error');
   assert.equal(signedOtherMessage, false);
 });
+
+test('merchant review has a separate explicit message and signer check', async () => {
+  const message = `IHUZA+ merchant review\nversion: 1\norigin: ${WEB_ORIGIN}\npurpose: approve merchant application only; no payment\nnetwork: ${TESTNET_PASSPHRASE}\nreviewer: ${address}\naccount: 11111111-1111-4111-8111-111111111111\nname_sha256: ${'a'.repeat(64)}\nreviewer_set_sha256: ${'b'.repeat(64)}\ndecision: approve\nnonce: ${'c'.repeat(64)}\nissued_at: 1000\nexpires_at: 1300`;
+  let signCalls = 0;
+  const wallet = createWalletService(fakeApi({ signMessage: async () => {
+    signCalls++;
+    return { signedMessage: new Uint8Array(64), signerAddress: address };
+  } }));
+  assert.equal((await wallet.signMerchantReview({ address, message })).status, 'signed');
+  assert.equal(signCalls, 1);
+  assert.equal((await wallet.signMerchantReview({ address, message: message.replace('decision: approve', 'decision: pay') })).status, 'error');
+  assert.equal(signCalls, 1);
+});

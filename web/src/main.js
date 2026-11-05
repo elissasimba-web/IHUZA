@@ -3,11 +3,13 @@ import { createWalletService } from './wallet.js';
 import { createOwnershipService } from './ownership.js';
 import { renderAccountQr, resolveAccountQr } from './account_qr.js';
 import { createMerchantApplicationService } from './merchant_application.js';
+import { createMerchantReviewService } from './merchant_review.js';
 import './styles.css';
 
 const service = createWalletService({ getAddress, getNetworkDetails, isAllowed, isConnected, requestAccess, signMessage });
 const ownership = createOwnershipService(service);
 const merchantApplication = createMerchantApplicationService();
+const merchantReview = createMerchantReviewService(service);
 const badge = document.querySelector('#status-badge');
 const message = document.querySelector('#wallet-message');
 const details = document.querySelector('#wallet-details');
@@ -31,6 +33,13 @@ const scanResult = document.querySelector('#scan-result');
 const merchantApplicationForm = document.querySelector('#merchant-application-form');
 const merchantApplicationStatus = document.querySelector('#merchant-application-status');
 const merchantName = document.querySelector('#merchant-name');
+const reviewForm = document.querySelector('#review-form');
+const reviewReference = document.querySelector('#review-reference');
+const reviewPreview = document.querySelector('#review-preview');
+const reviewName = document.querySelector('#review-name');
+const reviewMessage = document.querySelector('#review-message');
+const reviewSignButton = document.querySelector('#review-sign-button');
+const reviewStatus = document.querySelector('#review-status');
 
 const messages = {
   missing: ['Freighter ntiboneka', 'Shyira Freighter extension muri browser, hanyuma wongere ugenzure.'],
@@ -43,6 +52,7 @@ const messages = {
 let activeAddress = null;
 let activeChallenge = null;
 let busy = false;
+let activeReview = null;
 
 function clearOwnership() {
   activeChallenge = null;
@@ -54,6 +64,10 @@ function clearOwnership() {
   accountQr.hidden = true;
   merchantApplicationForm.hidden = true;
   merchantApplicationStatus.textContent = '';
+  activeReview = null;
+  reviewPreview.hidden = true;
+  reviewReference.disabled = false;
+  reviewStatus.textContent = '';
   ownershipMessage.textContent = '';
 }
 
@@ -63,7 +77,9 @@ async function refreshMerchantApplication() {
   try {
     const application = await merchantApplication.current();
     if (application) {
-      merchantApplicationStatus.textContent = `Ubusabe bwa “${application.proposed_name}” buracyasuzumwa. QR yawe iracyari iya konti isanzwe.`;
+      merchantApplicationStatus.textContent = application.status === 'approved'
+        ? `Ubusabe bwa “${application.proposed_name}” bwemejwe n’abasuzuma babiri. Checkout n’ibiciro ntibirubakwa.`
+        : `Ubusabe bwa “${application.proposed_name}” buracyasuzumwa. QR yawe iracyari iya konti isanzwe.`;
     } else {
       merchantApplicationForm.hidden = false;
       merchantApplicationStatus.textContent = '';
@@ -115,6 +131,9 @@ async function restoreSession() {
     accountQr.hidden = true;
     merchantApplicationForm.hidden = true;
     merchantApplicationStatus.textContent = '';
+    activeReview = null;
+    reviewPreview.hidden = true;
+    reviewReference.disabled = false;
     return;
   }
   ownershipMessage.textContent = 'Session ya testnet irakora.';
@@ -241,6 +260,53 @@ merchantApplicationForm.addEventListener('submit', async (event) => {
     merchantApplicationStatus.textContent = 'Ubusabe ntibwakiriwe. Reba izina wanditse cyangwa ubusabe busanzwe buriho.';
   } finally {
     button.disabled = false;
+    busy = false;
+  }
+});
+reviewForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (busy || !activeAddress) return;
+  busy = true;
+  activeReview = null;
+  reviewPreview.hidden = true;
+  reviewStatus.textContent = 'Turategura ubutumwa bw’isuzuma...';
+  const button = reviewForm.querySelector('button');
+  button.disabled = true;
+  try {
+    const prepared = await merchantReview.prepare(reviewReference.value.trim(), activeAddress);
+    activeReview = prepared;
+    reviewName.textContent = `Izina ryatanzwe: ${prepared.proposed_name}`;
+    reviewMessage.textContent = prepared.message;
+    reviewPreview.hidden = false;
+    reviewReference.disabled = true;
+    reviewStatus.textContent = 'Banza usuzume izina n’ubutumwa; sinyira gusa niba ubyemeye.';
+  } catch {
+    reviewStatus.textContent = 'Isuzuma ntiryabonetse. Reba ko uri reviewer wemewe na reference y’ubusabe.';
+  } finally {
+    button.disabled = false;
+    busy = false;
+  }
+});
+reviewSignButton.addEventListener('click', async () => {
+  if (busy || !activeReview) return;
+  busy = true;
+  reviewSignButton.disabled = true;
+  reviewStatus.textContent = 'Soma ubutumwa muri Freighter mbere yo kwemeza umukono.';
+  try {
+    const result = await merchantReview.submit(activeReview);
+    reviewStatus.textContent = result.approved
+      ? 'Imikono 2 muri 3 yemejwe. Merchant status irakora kuri iyi reviewer set; checkout ntirubakwa.'
+      : `Vote yabitswe (${result.votes}/2). Haracyakenewe undi reviewer.`;
+    activeReview = null;
+    reviewPreview.hidden = true;
+    reviewReference.disabled = false;
+  } catch {
+    reviewStatus.textContent = 'Umukono cyangwa vote ntibyemejwe. Ongera utegure isuzuma.';
+    activeReview = null;
+    reviewPreview.hidden = true;
+    reviewReference.disabled = false;
+  } finally {
+    reviewSignButton.disabled = false;
     busy = false;
   }
 });

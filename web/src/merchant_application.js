@@ -12,7 +12,7 @@ export function createMerchantApplicationService(fetchImpl = fetch) {
       if (response.status === 404) return null;
       if (!response.ok) throw new Error('merchant request unavailable');
       const result = await response.json();
-      if (result?.status !== 'pending' || !validMerchantName(result.proposed_name)) throw new Error('invalid merchant request');
+      if (!['pending', 'approved'].includes(result?.status) || !validMerchantName(result.proposed_name)) throw new Error('invalid merchant request');
       return result;
     },
     async submit(proposedName) {
@@ -26,7 +26,7 @@ export function createMerchantApplicationService(fetchImpl = fetch) {
       });
       if (!response.ok) throw new Error('merchant request rejected');
       const result = await response.json();
-      if (result?.status !== 'pending' || result.proposed_name !== proposedName) throw new Error('invalid merchant response');
+      if (!['pending', 'approved'].includes(result?.status) || result.proposed_name !== proposedName) throw new Error('invalid merchant response');
       return result;
     },
   };

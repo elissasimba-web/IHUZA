@@ -24,6 +24,30 @@ export function parseOwnershipMessage(message, address) {
   return { issued_at, expires_at };
 }
 
+export function parseMerchantReviewMessage(message, address) {
+  if (typeof message !== 'string' || !addressIsPlausible(address)) return null;
+  const lines = message.split('\n');
+  if (lines.length !== 13 || lines[0] !== 'IHUZA+ merchant review' || lines[1] !== 'version: 1') return null;
+  if (lines[2] !== `origin: ${WEB_ORIGIN}` || lines[3] !== 'purpose: approve merchant application only; no payment') return null;
+  if (lines[4] !== `network: ${TESTNET_PASSPHRASE}` || lines[5] !== `reviewer: ${address}`) return null;
+  if (!/^account: [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(lines[6])) return null;
+  if (!/^name_sha256: [0-9a-f]{64}$/.test(lines[7]) || !/^reviewer_set_sha256: [0-9a-f]{64}$/.test(lines[8])) return null;
+  if (lines[9] !== 'decision: approve' || !/^nonce: [0-9a-f]{64}$/.test(lines[10])) return null;
+  if (!/^issued_at: [0-9]+$/.test(lines[11]) || !/^expires_at: [0-9]+$/.test(lines[12])) return null;
+  const issued_at = Number(lines[11].slice('issued_at: '.length));
+  const expires_at = Number(lines[12].slice('expires_at: '.length));
+  if (!Number.isSafeInteger(issued_at) || !Number.isSafeInteger(expires_at) ||
+      issued_at <= 0 || expires_at <= issued_at || expires_at - issued_at > 300) return null;
+  return {
+    account_id: lines[6].slice('account: '.length),
+    name_hash: lines[7].slice('name_sha256: '.length),
+    reviewer_set_hash: lines[8].slice('reviewer_set_sha256: '.length),
+    nonce_hex: lines[10].slice('nonce: '.length),
+    issued_at,
+    expires_at,
+  };
+}
+
 function bytesToBase64(bytes) {
   let binary = '';
   for (const byte of bytes) binary += String.fromCharCode(byte);
@@ -77,29 +101,32 @@ export function createWalletService(api) {
     }
   }
 
+  async function signValidatedMessage({ address, message, validate }) {
+    if (!validate(message, address)) return { status: 'error', message: 'Ubutumwa bwo gusinya ntibwemewe.' };
+    const before = await read({ requestPermission: false });
+    if (before.status !== 'ready' || before.address !== address) {
+      return { status: 'error', message: 'Wallet cyangwa network byahindutse. Ongera ugenzure.' };
+    }
+    try {
+      const result = await api.signMessage(message, { networkPassphrase: TESTNET_PASSPHRASE, address });
+      if (result.error) return { status: 'error', message: 'Umukono ntiwemejwe muri Freighter.' };
+      if (result.signerAddress !== address) return { status: 'error', message: 'Aderesi yasinyiye si wallet wahisemo.' };
+      const signature = signatureBase64(result.signedMessage);
+      if (!signature) return { status: 'error', message: 'Umukono wa Freighter ufite format itemewe.' };
+      const after = await read({ requestPermission: false });
+      if (after.status !== 'ready' || after.address !== address) {
+        return { status: 'error', message: 'Wallet cyangwa network byahindutse. Ongera ugenzure.' };
+      }
+      return { status: 'signed', signature_base64: signature };
+    } catch {
+      return { status: 'error', message: 'Ntitwabashije gusinyisha Freighter. Ongera ugerageze.' };
+    }
+  }
+
   return {
     inspect: () => read({ requestPermission: false }),
     connect: () => read({ requestPermission: true }),
-    async signChallenge({ address, message }) {
-      if (!parseOwnershipMessage(message, address)) return { status: 'error', message: 'Challenge ntiyemewe.' };
-      const before = await read({ requestPermission: false });
-      if (before.status !== 'ready' || before.address !== address) {
-        return { status: 'error', message: 'Wallet cyangwa network byahindutse. Ongera ugenzure.' };
-      }
-      try {
-        const result = await api.signMessage(message, { networkPassphrase: TESTNET_PASSPHRASE, address });
-        if (result.error) return { status: 'error', message: 'Umukono ntiwemejwe muri Freighter.' };
-        if (result.signerAddress !== address) return { status: 'error', message: 'Aderesi yasinyiye si wallet wahisemo.' };
-        const signature = signatureBase64(result.signedMessage);
-        if (!signature) return { status: 'error', message: 'Umukono wa Freighter ufite format itemewe.' };
-        const after = await read({ requestPermission: false });
-        if (after.status !== 'ready' || after.address !== address) {
-          return { status: 'error', message: 'Wallet cyangwa network byahindutse. Ongera ugenzure.' };
-        }
-        return { status: 'signed', signature_base64: signature };
-      } catch {
-        return { status: 'error', message: 'Ntitwabashije gusinyisha Freighter. Ongera ugerageze.' };
-      }
-    },
+    signChallenge: ({ address, message }) => signValidatedMessage({ address, message, validate: parseOwnershipMessage }),
+    signMerchantReview: ({ address, message }) => signValidatedMessage({ address, message, validate: parseMerchantReviewMessage }),
   };
 }

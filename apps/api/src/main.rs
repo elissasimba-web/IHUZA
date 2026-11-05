@@ -5,15 +5,64 @@ use axum::{
     Json, Router,
 };
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-use ihuza_wallet_proof::{verify_challenge, Challenge, TESTNET_PASSPHRASE};
+use ihuza_wallet_proof::{
+    valid_stellar_address, verify_challenge, Challenge, MerchantReview, TESTNET_PASSPHRASE,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::{postgres::PgPoolOptions, PgPool, Row};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    net::SocketAddr,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 #[derive(Clone)]
 struct AppState {
     pool: PgPool,
+    reviewers: Option<ReviewerSet>,
+}
+
+#[derive(Clone)]
+struct ReviewerSet {
+    addresses: [String; 3],
+    hash: String,
+}
+
+fn sha256_hex(value: &str) -> String {
+    Sha256::digest(value.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+fn reviewer_set_from_config(value: &str) -> Result<ReviewerSet, &'static str> {
+    let mut addresses: Vec<String> = value.split(',').map(str::trim).map(str::to_owned).collect();
+    if addresses.len() != 3
+        || addresses
+            .iter()
+            .any(|address| !valid_stellar_address(address))
+    {
+        return Err("IHUZA_REVIEWER_ADDRESSES must contain exactly three valid Stellar addresses");
+    }
+    addresses.sort();
+    addresses.dedup();
+    if addresses.len() != 3 {
+        return Err("Reviewer addresses must be distinct");
+    }
+    let hash = sha256_hex(&addresses.join("\n"));
+    Ok(ReviewerSet {
+        addresses: addresses.try_into().map_err(|_| "Invalid reviewer set")?,
+        hash,
+    })
+}
+
+fn require_reviewer_set(state: &AppState) -> Result<&ReviewerSet, (StatusCode, Json<ErrorBody>)> {
+    state.reviewers.as_ref().ok_or_else(|| {
+        error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Reviewer configuration ntirashyirwaho.",
+        )
+    })
 }
 
 #[derive(Serialize)]
@@ -354,6 +403,28 @@ async fn session_account_id(
     .ok_or_else(|| error(StatusCode::UNAUTHORIZED, "Session ntiyemewe."))
 }
 
+async fn reviewer_session(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<(String, String), (StatusCode, Json<ErrorBody>)> {
+    let reviewers = require_reviewer_set(state)?;
+    let hash = session_hash(headers)?;
+    let row = sqlx::query(
+        "SELECT s.account_id::text AS account_id, w.stellar_address FROM account_sessions s JOIN wallet_links w ON w.account_id = s.account_id WHERE s.token_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > now() AND w.network_passphrase = $2",
+    )
+    .bind(hash.as_slice())
+    .bind(TESTNET_PASSPHRASE)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(internal_error)?
+    .ok_or_else(|| error(StatusCode::UNAUTHORIZED, "Session ntiyemewe."))?;
+    let address: String = row.try_get("stellar_address").map_err(internal_error)?;
+    if !reviewers.addresses.contains(&address) {
+        return Err(error(StatusCode::FORBIDDEN, "Reviewer ntiyemewe."));
+    }
+    Ok((row.try_get("account_id").map_err(internal_error)?, address))
+}
+
 async fn logout(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -409,13 +480,24 @@ async fn resolve_qr(
     {
         return Err(error(StatusCode::BAD_REQUEST, "QR reference ntiyemewe."));
     }
-    let account_kind: String =
-        sqlx::query_scalar("SELECT account_kind FROM accounts WHERE qr_reference = $1")
-            .bind(&reference)
-            .fetch_optional(&state.pool)
-            .await
-            .map_err(internal_error)?
-            .ok_or_else(|| error(StatusCode::NOT_FOUND, "Konti ntiyabonetse."))?;
+    let row = sqlx::query("SELECT a.id::text AS account_id, m.proposed_name FROM accounts a LEFT JOIN merchant_applications m ON m.account_id = a.id WHERE a.qr_reference = $1")
+        .bind(&reference)
+        .fetch_optional(&state.pool)
+        .await
+        .map_err(internal_error)?
+        .ok_or_else(|| error(StatusCode::NOT_FOUND, "Konti ntiyabonetse."))?;
+    let account_id: String = row.try_get("account_id").map_err(internal_error)?;
+    let proposed_name: Option<String> = row.try_get("proposed_name").map_err(internal_error)?;
+    let account_kind = if let Some(name) = proposed_name {
+        if approval_count(&state, &account_id, &name).await? >= 2 {
+            "merchant"
+        } else {
+            "person"
+        }
+    } else {
+        "person"
+    }
+    .to_owned();
     let mut headers = HeaderMap::new();
     headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     Ok((
@@ -444,6 +526,207 @@ fn valid_merchant_name(name: &str) -> bool {
     (2..=80).contains(&length) && name.trim() == name && !name.chars().any(char::is_control)
 }
 
+async fn approval_count(
+    state: &AppState,
+    account_id: &str,
+    proposed_name: &str,
+) -> Result<usize, (StatusCode, Json<ErrorBody>)> {
+    let Some(reviewers) = &state.reviewers else {
+        return Ok(0);
+    };
+    let rows = sqlx::query(
+        "SELECT reviewer_address, name_hash, nonce_hex, signature_base64, extract(epoch from issued_at)::bigint AS issued_at, extract(epoch from expires_at)::bigint AS expires_at, extract(epoch from approved_at)::bigint AS approved_at FROM merchant_approval_votes WHERE account_id = $1::uuid AND reviewer_set_hash = $2",
+    )
+    .bind(account_id)
+    .bind(&reviewers.hash)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(internal_error)?;
+    let expected_name_hash = sha256_hex(proposed_name);
+    let mut count = 0;
+    for row in rows {
+        let address: String = row.try_get("reviewer_address").map_err(internal_error)?;
+        let name_hash: String = row.try_get("name_hash").map_err(internal_error)?;
+        if !reviewers.addresses.contains(&address) || name_hash != expected_name_hash {
+            continue;
+        }
+        let issued_at: i64 = row.try_get("issued_at").map_err(internal_error)?;
+        let expires_at: i64 = row.try_get("expires_at").map_err(internal_error)?;
+        let approved_at: i64 = row.try_get("approved_at").map_err(internal_error)?;
+        let (Ok(issued_at), Ok(expires_at), Ok(approved_at)) = (
+            issued_at.try_into(),
+            expires_at.try_into(),
+            approved_at.try_into(),
+        ) else {
+            continue;
+        };
+        let review = MerchantReview {
+            reviewer_address: address,
+            account_id: account_id.to_owned(),
+            name_hash,
+            reviewer_set_hash: reviewers.hash.clone(),
+            nonce_hex: row.try_get("nonce_hex").map_err(internal_error)?,
+            issued_at,
+            expires_at,
+        };
+        let signature: String = row.try_get("signature_base64").map_err(internal_error)?;
+        if review.verify(approved_at, &signature) {
+            count += 1;
+        }
+    }
+    Ok(count)
+}
+
+#[derive(Serialize)]
+struct ReviewMessageResponse {
+    proposed_name: String,
+    nonce_hex: String,
+    issued_at: u64,
+    expires_at: u64,
+    message: String,
+}
+
+async fn review_target(
+    state: &AppState,
+    reference: &str,
+    reviewer_account_id: &str,
+) -> Result<(String, String), (StatusCode, Json<ErrorBody>)> {
+    if reference.len() != 43
+        || !reference
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    {
+        return Err(error(StatusCode::BAD_REQUEST, "QR reference ntiyemewe."));
+    }
+    let row = sqlx::query(
+        "SELECT a.id::text AS account_id, m.proposed_name FROM accounts a JOIN merchant_applications m ON m.account_id = a.id WHERE a.qr_reference = $1",
+    )
+    .bind(reference)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(internal_error)?
+    .ok_or_else(|| error(StatusCode::NOT_FOUND, "Ubusabe ntibuboneka."))?;
+    let account_id: String = row.try_get("account_id").map_err(internal_error)?;
+    if account_id == reviewer_account_id {
+        return Err(error(StatusCode::FORBIDDEN, "Kwiyemeza ntibyemewe."));
+    }
+    Ok((
+        account_id,
+        row.try_get("proposed_name").map_err(internal_error)?,
+    ))
+}
+
+async fn review_message(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(reference): Path<String>,
+) -> Result<(HeaderMap, Json<ReviewMessageResponse>), (StatusCode, Json<ErrorBody>)> {
+    let reviewers = require_reviewer_set(&state)?;
+    let (reviewer_account_id, reviewer_address) = reviewer_session(&state, &headers).await?;
+    let (account_id, proposed_name) =
+        review_target(&state, &reference, &reviewer_account_id).await?;
+    let issued_at = unix_now()?;
+    let mut nonce = [0_u8; 32];
+    getrandom::getrandom(&mut nonce)
+        .map_err(|_| error(StatusCode::INTERNAL_SERVER_ERROR, "Randomness ntiboneka."))?;
+    let review = MerchantReview {
+        reviewer_address,
+        account_id,
+        name_hash: sha256_hex(&proposed_name),
+        reviewer_set_hash: reviewers.hash.clone(),
+        nonce_hex: nonce.iter().map(|byte| format!("{byte:02x}")).collect(),
+        issued_at,
+        expires_at: issued_at + 300,
+    };
+    let mut response_headers = HeaderMap::new();
+    response_headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    Ok((
+        response_headers,
+        Json(ReviewMessageResponse {
+            proposed_name,
+            nonce_hex: review.nonce_hex.clone(),
+            issued_at,
+            expires_at: review.expires_at,
+            message: review.message(),
+        }),
+    ))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReviewProofRequest {
+    nonce_hex: String,
+    issued_at: u64,
+    expires_at: u64,
+    signature_base64: String,
+}
+
+#[derive(Serialize)]
+struct ReviewProofResponse {
+    votes: usize,
+    threshold: usize,
+    approved: bool,
+}
+
+async fn submit_review(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(reference): Path<String>,
+    Json(input): Json<ReviewProofRequest>,
+) -> Result<(HeaderMap, Json<ReviewProofResponse>), (StatusCode, Json<ErrorBody>)> {
+    require_origin(&headers)?;
+    let reviewers = require_reviewer_set(&state)?;
+    if input.signature_base64.len() > 200 {
+        return Err(error(StatusCode::BAD_REQUEST, "Umukono ntiwemewe."));
+    }
+    let (reviewer_account_id, reviewer_address) = reviewer_session(&state, &headers).await?;
+    let (account_id, proposed_name) =
+        review_target(&state, &reference, &reviewer_account_id).await?;
+    let review = MerchantReview {
+        reviewer_address: reviewer_address.clone(),
+        account_id: account_id.clone(),
+        name_hash: sha256_hex(&proposed_name),
+        reviewer_set_hash: reviewers.hash.clone(),
+        nonce_hex: input.nonce_hex,
+        issued_at: input.issued_at,
+        expires_at: input.expires_at,
+    };
+    if !review.verify(unix_now()?, &input.signature_base64) {
+        return Err(error(
+            StatusCode::UNAUTHORIZED,
+            "Umukono wa reviewer ntiwemewe.",
+        ));
+    }
+    let inserted: Option<String> = sqlx::query_scalar(
+        "INSERT INTO merchant_approval_votes (account_id, reviewer_address, reviewer_set_hash, name_hash, nonce_hex, issued_at, expires_at, signature_base64) VALUES ($1::uuid, $2, $3, $4, $5, to_timestamp($6::double precision), to_timestamp($7::double precision), $8) ON CONFLICT DO NOTHING RETURNING id::text",
+    )
+    .bind(&account_id)
+    .bind(&reviewer_address)
+    .bind(&review.reviewer_set_hash)
+    .bind(&review.name_hash)
+    .bind(&review.nonce_hex)
+    .bind(review.issued_at as i64)
+    .bind(review.expires_at as i64)
+    .bind(&input.signature_base64)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(internal_error)?;
+    if inserted.is_none() {
+        return Err(error(StatusCode::CONFLICT, "Vote yamaze kubikwa."));
+    }
+    let votes = approval_count(&state, &account_id, &proposed_name).await?;
+    let mut response_headers = HeaderMap::new();
+    response_headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    Ok((
+        response_headers,
+        Json(ReviewProofResponse {
+            votes,
+            threshold: 2,
+            approved: votes >= 2,
+        }),
+    ))
+}
+
 async fn get_merchant_application(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -457,13 +740,18 @@ async fn get_merchant_application(
     .await
     .map_err(internal_error)?
     .ok_or_else(|| error(StatusCode::NOT_FOUND, "Ubusabe ntibuboneka."))?;
+    let status = if approval_count(&state, &account_id, &proposed_name).await? >= 2 {
+        "approved"
+    } else {
+        "pending"
+    };
     let mut response_headers = HeaderMap::new();
     response_headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     Ok((
         response_headers,
         Json(MerchantApplicationResponse {
             proposed_name,
-            status: "pending",
+            status,
         }),
     ))
 }
@@ -505,6 +793,11 @@ async fn submit_merchant_application(
         }
         (StatusCode::OK, existing)
     };
+    let application_status = if approval_count(&state, &account_id, &proposed_name).await? >= 2 {
+        "approved"
+    } else {
+        "pending"
+    };
     Ok((
         status,
         {
@@ -514,7 +807,7 @@ async fn submit_merchant_application(
         },
         Json(MerchantApplicationResponse {
             proposed_name,
-            status: "pending",
+            status: application_status,
         }),
     ))
 }
@@ -522,6 +815,11 @@ async fn submit_merchant_application(
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenvy::dotenv().ok();
+    let reviewers = match std::env::var("IHUZA_REVIEWER_ADDRESSES") {
+        Ok(value) => Some(reviewer_set_from_config(&value)?),
+        Err(std::env::VarError::NotPresent) => None,
+        Err(error) => return Err(error.into()),
+    };
     let url = std::env::var("DATABASE_URL")?;
     let pool = PgPoolOptions::new()
         .max_connections(5)
@@ -540,12 +838,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/session/logout", post(logout))
         .route("/api/qr/{reference}", get(resolve_qr))
         .route(
+            "/api/merchant-review/{reference}",
+            get(review_message).post(submit_review),
+        )
+        .route(
             "/api/merchant-application",
             get(get_merchant_application).post(submit_merchant_application),
         )
         .layer(DefaultBodyLimit::max(4096))
-        .with_state(AppState { pool });
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:3000").await?;
+        .with_state(AppState { pool, reviewers });
+    let bind = std::env::var("IHUZA_API_BIND").unwrap_or_else(|_| "127.0.0.1:3000".to_owned());
+    let address: SocketAddr = bind.parse()?;
+    if address.ip().to_string() != "127.0.0.1" {
+        return Err("API bind must be 127.0.0.1".into());
+    }
+    let listener = tokio::net::TcpListener::bind(address).await?;
     axum::serve(listener, app).await?;
     Ok(())
 }

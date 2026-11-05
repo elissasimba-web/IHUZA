@@ -11,8 +11,8 @@ IHUZA+ ni umushinga wa serivisi z'imari n'iz'ubucuruzi ugenewe u Rwanda. Ubu iyi
 - `scripts/check_stellar_testnet.ps1` ni read-only network probe; ntabwo ari payment integration.
 - `web/` ihuza Freighter kuri Stellar testnet, ikerekana challenge n'ubutumwa businywa mbere ya popup, ikagenzura network, origin, aderesi na signer, hanyuma ikohereza signature kuri API. Ishushanya QR imwe y'account reference muri browser kandi ishobora kugenzura reference yanditswe n'umukoresha. Nta transaction ikora.
 - `crates/wallet_proof` itanga nonce ya 256-bit ivuye muri OS RNG, ikanagenzura umukono wa SEP-53 kuri challenge ya Stellar testnet n'igihe imara.
-- PostgreSQL database `ihuza_web3_testnet` iri muri container `ihuza-web3-postgres`; migrations `001_identity.sql`, `002_sessions.sql` na `003_merchant_applications.sql` zashyizweho na `sqlx`. Irimo identity, session n'ubusabe bw'abifuza kuba abacuruzi gusa, nta wallet funds cyangwa payment records. Reba [gahunda ya database](docs/WEB3_DATA_PLAN.md).
-- `apps/api` ifite endpoints za localhost za wallet proof, session, QR resolver na `/api/merchant-application`. Nyiri session ashobora gusaba kuba umucuruzi no kureba ubusabe bwe; ubusabe ni `pending` gusa. Nta merchant approval, catalog, checkout cyangwa payment irimo. Database ibika hash ya session token gusa. Igeragezwa rya end-to-end ryatsinze, harimo requests ebyiri zigeze icyarimwe. Freighter nyayo ntirageragezwa muri browser ifite extension.
+- PostgreSQL database `ihuza_web3_testnet` iri muri container `ihuza-web3-postgres`; migrations `001_identity.sql` kugeza kuri `004_merchant_approval_votes.sql` zashyizweho na `sqlx`. Irimo identity, sessions, merchant applications na review votes gusa, nta wallet funds cyangwa payment records. Reba [gahunda ya database](docs/WEB3_DATA_PLAN.md).
+- `apps/api` ifite endpoints za localhost za wallet proof, session, QR resolver, merchant application na review ya 2-of-3. Reviewer addresses eshatu zigomba gushyirwa muri `IHUZA_REVIEWER_ADDRESSES`; iyo config ibuze, approval irafungwa. Votes ebyiri zifite signatures zemewe zitanga merchant status kuri testnet, ariko QR ikomeza kuvuga ko checkout itaraboneka. Nta catalog, checkout cyangwa payment irimo. Igeragezwa rya end-to-end ryatsinze n'imfunguzo z'igerageza zo muri memory; Freighter nyayo ntirageragezwa muri browser ifite extension.
 
 ## Ibyo project izubaka
 
@@ -30,6 +30,7 @@ Ibisabwa: Rust, `wasm32v1-none` target, na Stellar CLI ihuye na Soroban SDK v26.
 cargo test --locked
 stellar contract build
 node scripts/test_wallet_api.mjs # isaba API ikora; irema konti z'igerageza
+node scripts/test_merchant_approval.mjs # isaba ihuza-web3-postgres na cargo build --bin ihuza-api; irema konti z'igerageza
 cd web
 npm ci
 npm test
@@ -40,4 +41,4 @@ Fungura `http://127.0.0.1:5173` muri browser ifite Freighter extension, uyishyir
 
 Gutangira API: muri `backend/`, banza `docker start ihuza-web3-postgres` niba itari gukora, hanyuma `cargo run --locked --bin ihuza-api`. `.env` ya development ibika `DATABASE_URL` ya database user ifite uburenganzira buke; Git irayirengagiza. API yumva kuri `127.0.0.1:3000` gusa. `node scripts/test_wallet_api.mjs` irema konti z'igerageza muri database ya local development.
 
-Nta mabanga ya wallet ashyirwa muri iyi repository. Session cookie ya localhost ikoresha HTTP; deployment izasaba HTTPS na `Secure` cookie mbere yo gukoreshwa hanze. Nta RWF token, CBDC, EBM, bank, MTN cyangwa Airtel integration irimo. Iyimurika rigomba kwerekana prototype nk'uko iri, rikavuga neza ko ubwishyu nyabwo na Receipt Vault bitarubakwa.
+Nta mabanga ya wallet cyangwa reviewer ashyirwa muri iyi repository. `IHUZA_REVIEWER_ADDRESSES` yakira **public** Stellar addresses eshatu zitandukanye zatanzwe na nyiri project; nta seeds cyangwa private keys zoherezwa kuri server. Reba [plan ya merchant approval](docs/MERCHANT_APPROVAL_PLAN.md). Session cookie ya localhost ikoresha HTTP; deployment izasaba HTTPS na `Secure` cookie mbere yo gukoreshwa hanze. Nta RWF token, CBDC, EBM, bank, MTN cyangwa Airtel integration irimo. Iyimurika rigomba kwerekana prototype nk'uko iri, rikavuga neza ko ubwishyu nyabwo na Receipt Vault bitarubakwa.

@@ -443,6 +443,41 @@ a {
   margin-bottom:8px;
   font-size:12px
 }
+.reviewer-panel {
+  margin:18px 0;
+  padding:16px;
+  border:1px solid #ffffff24;
+  border-radius:10px
+}
+.reviewer-panel summary {
+  cursor:pointer;
+  font-size:13px;
+  font-weight:700
+}
+.reviewer-panel p,.reviewer-panel label {
+  color:#a9c6c7;
+  font-size:12px;
+  line-height:1.6
+}
+.reviewer-panel label {
+  display:block;
+  margin-bottom:8px
+}
+.reviewer-panel #review-preview[hidden] {
+  display:none
+}
+.reviewer-panel pre {
+  overflow-wrap:anywhere;
+  white-space:pre-wrap;
+  max-height:290px;
+  overflow:auto;
+  padding:14px;
+  border-radius:9px;
+  background:#061720;
+  color:#b5f5d0;
+  font-size:11px;
+  line-height:1.5
+}
 .scan-section {
   background:#0a222d
 }

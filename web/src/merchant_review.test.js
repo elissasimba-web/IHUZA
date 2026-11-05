@@ -1,0 +1,41 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { createMerchantReviewService } from './merchant_review.js';
+import { TESTNET_PASSPHRASE, WEB_ORIGIN } from './wallet.js';
+
+const reference = 'a'.repeat(43);
+const address = 'G' + 'A'.repeat(55);
+const name = 'Iduka Ryawe';
+const hash = createHash('sha256').update(name).digest('hex');
+const review = {
+  proposed_name: name,
+  nonce_hex: 'b'.repeat(64), issued_at: 1000, expires_at: 1300,
+  message: `IHUZA+ merchant review\nversion: 1\norigin: ${WEB_ORIGIN}\npurpose: approve merchant application only; no payment\nnetwork: ${TESTNET_PASSPHRASE}\nreviewer: ${address}\naccount: 11111111-1111-4111-8111-111111111111\nname_sha256: ${hash}\nreviewer_set_sha256: ${'c'.repeat(64)}\ndecision: approve\nnonce: ${'b'.repeat(64)}\nissued_at: 1000\nexpires_at: 1300`,
+};
+const wallet = { inspect: async () => ({ status: 'ready', address }), signMerchantReview: async () => ({ status: 'signed', signature_base64: 'x'.repeat(88) }) };
+
+test('reviewer sees exact application and message before explicit signing', async () => {
+  const calls = [];
+  const service = createMerchantReviewService(wallet, async (path, options) => {
+    calls.push({ path, options });
+    if (options.method === 'POST') return { ok: true, json: async () => ({ votes: 2, threshold: 2, approved: true }) };
+    return { ok: true, json: async () => review };
+  }, () => 1100);
+  const prepared = await service.prepare(reference, address);
+  assert.equal(calls.length, 1);
+  assert.equal(prepared.message, review.message);
+  assert.deepEqual(await service.submit(prepared), { votes: 2, threshold: 2, approved: true });
+  assert.equal(calls[1].options.credentials, 'same-origin');
+  assert.equal(JSON.parse(calls[1].options.body).nonce_hex, review.nonce_hex);
+});
+
+test('changed name hash or expired review cannot be signed', async () => {
+  let signed = false;
+  const protectedWallet = { ...wallet, signMerchantReview: async () => { signed = true; return {}; } };
+  const changed = createMerchantReviewService(protectedWallet, async () => ({ ok: true, json: async () => ({ ...review, proposed_name: 'Irindi Duka' }) }), () => 1100);
+  await assert.rejects(() => changed.prepare(reference, address));
+  const expired = createMerchantReviewService(protectedWallet, async () => ({ ok: true, json: async () => review }), () => 1300);
+  await assert.rejects(() => expired.prepare(reference, address));
+  assert.equal(signed, false);
+});

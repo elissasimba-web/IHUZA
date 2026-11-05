@@ -1,6 +1,6 @@
 # IHUZA+ — gahunda ya database nshya ya testnet
 
-Iyi ni gahunda yo kubaka API na database ya Web3 testnet. `db/web3_testnet/001_identity.sql` na `002_sessions.sql` zashyizwe muri `ihuza_web3_testnet` na `sqlx`. API ya localhost itanga challenge ikanagenzura proof, ikarema cyangwa igasoma konti muri transaction, ikanatanga session. Frontend ihuza Freighter kuri iyo API.
+Iyi ni gahunda n'amateka yo kubaka API na database ya Web3 testnet. Migrations `001_identity.sql` kugeza kuri `004_merchant_approval_votes.sql` zashyizwe muri `ihuza_web3_testnet` na `sqlx`. API ya localhost itanga challenge ikanagenzura proof, ikarema cyangwa igasoma konti muri transaction, ikanatanga session. Frontend ihuza Freighter kuri iyo API. `003` ibika merchant applications, `004` ikabika votes za reviewers; nta payment cyangwa wallet funds bibikwa hano.
 
 ## Gahunda yasuzumwe ya `002_sessions.sql`
 
@@ -11,12 +11,14 @@ Iyi ni gahunda yo kubaka API na database ya Web3 testnet. `db/web3_testnet/001_i
 
 ## Gahunda ya `003_merchant_applications.sql`
 
-- Ubusabe bwo kuba umucuruzi bubikwa off-chain muri `merchant_applications`: `account_id` imwe, izina umusaba yatanze, igihe yabisabiye. Ubusabe ni `pending` gusa; ntabwo buhindura `accounts.account_kind`, QR cyangwa uburenganzira bwo kwakira checkout. Izina ntiryemejwe n'ubusabe bwonyine.
+- Ubusabe bwo kuba umucuruzi bubikwa off-chain muri `merchant_applications`: `account_id` imwe, izina umusaba yatanze, igihe yabisabiye. Iyo bugitangwa buba `pending`; votes 2 zemewe zishobora kubwerekana nka `approved` kuri testnet. Ubusabe ubwabwo ntibuhindura `accounts.account_kind`, QR cyangwa uburenganzira bwo kwakira checkout. Izina ntiryemejwe n'ubusabe bwonyine.
 - Gukora no gusoma ubusabe bisaba session ya konti nyirayo. API ikura `account_id` muri session yagenzuwe, si mu byo umukoresha yohereje. Ubusabe bumwe kuri konti; gusubiramo izina rimwe ntibyongera record, guhindura izina bisaba inzira izasuzumwa nyuma. Runtime role ihabwa `SELECT` na `INSERT` gusa; nta `UPDATE` cyangwa `DELETE`.
-- Nta reviewer/admin endpoint iri muri iki gice. Uko merchant yemezwa, ibimenyetso bisabwa n'uburenganzira bwa reviewer bizasobanurwa mbere yo kwandika approval migration cyangwa guhindura `account_kind`. Wallet ya customer ikomeza kugenzurwa na nyirayo.
-- Migration igira guard ya `ihuza_web3_testnet`; ntihindura migrations zashyizweho. Mbere yo kuyikoresha, suzuma SQL n'uburenganzira. Nyuma yayo, gerageza session yemewe/itarimo, duplicate, isolation hagati ya konti ebyiri, kandi wemeze ko QR ikomeza kugaragaza `person_transfer_preview`.
+- Igihe `003` yakorwaga nta reviewer endpoint yariho. Ubu `004` na API ya 2-of-3 birahari kuri testnet. Ibimenyetso bisabwa, rejection na suspension biracyakeneye policy. Wallet ya customer ikomeza kugenzurwa na nyirayo.
+- Migration igira guard ya `ihuza_web3_testnet`; ntihindura migrations zashyizweho. Isuzuma ryakozwe kuri session yemewe/itarimo, duplicate, isolation hagati ya konti ebyiri, na QR ya konti itaremezwa igaragaza `person_transfer_preview`. Nyuma ya votes 2 zemewe, QR igaragaza merchant status ariko checkout ikaguma `unavailable`.
 
 ## Ahazubakwa
+
+- Approval ya testnet: reviewer public addresses eshatu zitandukanye muri config; umukono wa SEP-53 kuri application, izina, reviewer set, nonce n'igihe. Votes ebyiri mu itsinda ririho zigaragaza merchant status, ariko checkout irafunze. Reba `docs/MERCHANT_APPROVAL_PLAN.md`.
 
 - Database yihariye `ihuza_web3_testnet` ifite connection string yayo. Mainnet izakenera database n'amabwiriza byayo ukwabyo.
 - Umukoresha atangira yemeza ko afite urufunguzo rwa Stellar testnet address akoresheje SEP-53. Konti nshya n'ihuriro rya wallet bikorerwa muri transaction imwe nyuma yo kugenzura challenge. Konti iriho ishobora kongera kwinjira ikoresheje address imaze guhuzwa; uburyo bwo kongeramo indi wallet buzabanza kugira amabwiriza yihariye.

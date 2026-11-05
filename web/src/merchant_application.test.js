@@ -22,6 +22,8 @@ test('merchant application validates name and only sends it with the session coo
 test('unsubmitted application and forged approval do not appear as approved', async () => {
   const missing = createMerchantApplicationService(async () => ({ status: 404 }));
   assert.equal(await missing.current(), null);
-  const forged = createMerchantApplicationService(async () => ({ ok: true, json: async () => ({ proposed_name: 'Iduka', status: 'approved' }) }));
+  const approved = createMerchantApplicationService(async () => ({ ok: true, json: async () => ({ proposed_name: 'Iduka', status: 'approved' }) }));
+  assert.equal((await approved.current()).status, 'approved');
+  const forged = createMerchantApplicationService(async () => ({ ok: true, json: async () => ({ proposed_name: 'Iduka', status: 'checkout_ready' }) }));
   await assert.rejects(() => forged.current());
 });
