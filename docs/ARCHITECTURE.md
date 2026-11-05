@@ -2,7 +2,7 @@
 
 ## Aho tugeze
 
-Iri shami rifite Soroban `intent_anchor` contract, read-only testnet probe, na frontend ihuza Freighter wallet kuri testnet ikerekana public address. Nta API, database schema nshya, account ownership proof, QR resolver, chain indexer, payment cyangwa Receipt Vault birimo. Mu iyimurika bigomba kuvugwa uko biri.
+Iri shami rifite Soroban `intent_anchor` contract, read-only testnet probe, frontend ihuza Freighter wallet kuri testnet ikerekana public address, na Rust library igenzura SEP-53 wallet signature. Nta API, database schema nshya, wallet-to-account binding, QR resolver, chain indexer, payment cyangwa Receipt Vault birimo. Mu iyimurika bigomba kuvugwa uko biri.
 
 Iyi prototype ntikoresha PostgreSQL kugeza ubu. Hazakenerwa database nshya y'amakuru ya off-chain, yubatse ku bisabwa n'iyi architecture; ntituzafata records za database ya kera nk'aho ari amafaranga ya Stellar.
 
@@ -16,7 +16,7 @@ PostgreSQL migrations aracyakenewe ku makuru ya off-chain. Gukoresha database nt
 
 ## Umutekano n'uburyo bwo kubaka
 
-1. Hitamo wallet UX na recovery model idaha server private keys. Huze konti na Stellar address ukoresheje challenge ifite network, expiry na signature yagenzuwe.
+1. Hitamo wallet UX na recovery model idaha server private keys. Huze konti na Stellar address ukoresheje challenge ifite network, expiry na signature yagenzuwe. Server igomba gutanga nonce itabasha gukekwa, kuyibika ku konti iri mu session, no kuyikoresha rimwe gusa mu gikorwa kimwe cya database transaction. Signature yonyine ntihagije mu guhuza konti; Stellar multisig authorization isaba igenzura ryihariye.
 2. Wubake identity, merchant approval, catalog n'account QR imwe mu API nshya. Ibirimo QR bibe opaque kandi bidashobora gukekwa.
 3. Wubake quote na Smart Invoice ibarwa na server, ifite snapshots z'ibiciro n'idempotency. Payer arebe network, asset, recipient, amount na expiry mbere yo gusinya.
 4. Ohereza cyangwa urebe transaction; genzura network, source, destination, asset, amount, success na unique reference byigenga. Indexing na receipt creation bibe idempotent kandi bishobore gusubirwamo nyuma y'ikosa.

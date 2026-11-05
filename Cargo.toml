@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["contracts/intent_anchor"]
+members = ["contracts/intent_anchor", "crates/wallet_proof"]
 
 [profile.release]
 opt-level = "z"

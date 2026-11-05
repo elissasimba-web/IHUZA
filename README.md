@@ -10,6 +10,7 @@ IHUZA+ ni umushinga wa serivisi z'imari n'iz'ubucuruzi ugenewe u Rwanda. Ubu iyi
 - `cargo test --locked --offline` yatsinze; `stellar contract build` yatanze Wasm. Nta contract yashyizwe kuri testnet cyangwa mainnet.
 - `scripts/check_stellar_testnet.ps1` ni read-only network probe; ntabwo ari payment integration.
 - `web/` ifite frontend ihuza Freighter wallet kandi ikemeza ko iri kuri Stellar testnet. Yerekana public address gusa; nta transaction ikora kandi nta konti ya IHUZA+ ihuzwa na wallet kugeza ubu.
+- `crates/wallet_proof` igenzura umukono wa SEP-53 kuri challenge ya Stellar testnet, uko nonce yanditse n'igihe challenge imara. Nta server itanga cyangwa ibika challenge, kandi nta konti ihuzwa na wallet kugeza nonce ishobora gukoreshwa rimwe gusa mu buryo bwizewe.
 
 ## Ibyo project izubaka
 
