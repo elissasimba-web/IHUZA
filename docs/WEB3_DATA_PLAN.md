@@ -1,6 +1,6 @@
 # IHUZA+ — gahunda ya database nshya ya testnet
 
-Iyi ni gahunda yo kubaka API na database ya Web3 testnet. `db/web3_testnet/001_identity.sql` yashyizwe muri `ihuza_web3_testnet` na `sqlx`; tables 4 zaremewe. Nta API cyangwa wallet-to-account binding irakorwa.
+Iyi ni gahunda yo kubaka API na database ya Web3 testnet. `db/web3_testnet/001_identity.sql` yashyizwe muri `ihuza_web3_testnet` na `sqlx`; tables 4 zaremewe. API ya localhost itanga challenge ikanagenzura proof, ikarema cyangwa igasoma konti muri transaction. Nta session cyangwa frontend integration irimo.
 
 ## Ahazubakwa
 

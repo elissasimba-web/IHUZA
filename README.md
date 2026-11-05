@@ -10,8 +10,9 @@ IHUZA+ ni umushinga wa serivisi z'imari n'iz'ubucuruzi ugenewe u Rwanda. Ubu iyi
 - `cargo test --locked --offline` yatsinze; `stellar contract build` yatanze Wasm. Nta contract yashyizwe kuri testnet cyangwa mainnet.
 - `scripts/check_stellar_testnet.ps1` ni read-only network probe; ntabwo ari payment integration.
 - `web/` ifite frontend ihuza Freighter wallet kandi ikemeza ko iri kuri Stellar testnet. Yerekana public address gusa; nta transaction ikora kandi nta konti ya IHUZA+ ihuzwa na wallet kugeza ubu.
-- `crates/wallet_proof` itanga nonce ya 256-bit ivuye muri OS RNG, ikanagenzura umukono wa SEP-53 kuri challenge ya Stellar testnet n'igihe imara. Nta API irabika cyangwa ngo ikoreshe challenge, kandi nta konti ihuzwa na wallet kugeza nonce ishobora gukoreshwa rimwe gusa mu buryo bwizewe.
+- `crates/wallet_proof` itanga nonce ya 256-bit ivuye muri OS RNG, ikanagenzura umukono wa SEP-53 kuri challenge ya Stellar testnet n'igihe imara.
 - PostgreSQL database `ihuza_web3_testnet` iri muri container `ihuza-web3-postgres`; `db/web3_testnet/001_identity.sql` yashyizweho na `sqlx`, ikora tables 4. Irimo identity metadata gusa, nta wallet funds cyangwa payment records. Reba [gahunda ya database](docs/WEB3_DATA_PLAN.md).
+- `apps/api` ifite endpoints za localhost `/wallet/challenges` na `/wallet/proofs`: ibika nonce, igenzura umukono, ikora konti ifite QR reference imwe, kandi ikumira replay muri database transaction. Igeragezwa rya end-to-end ryatsinze, harimo requests ebyiri zigeze icyarimwe. Nta session, wallet UI connection, payment cyangwa merchant checkout irimo.
 
 ## Ibyo project izubaka
 
@@ -19,7 +20,7 @@ Umukiriya azakoresha wallet yigenzurira, ascan-e **QR imwe ihoraho** ya konti y'
 
 Merchant Assistant izafasha umucuruzi kwandika suppliers, procurement, stock movements, ibicuruzwa, sales na reports. Ibyo byose n'inyandiko z'abakiriya bizabikwa mu buryo burinda amakuru yihariye; si ngombwa kubishyira kuri blockchain.
 
-Reba [ibyo twemeranyijwe ku bicuruzwa](docs/PRODUCT_REQUIREMENTS.md) n'[imyubakire ya tekiniki](docs/ARCHITECTURE.md). Database schema irahari, ariko nta API iyikoresha kugeza ubu.
+Reba [ibyo twemeranyijwe ku bicuruzwa](docs/PRODUCT_REQUIREMENTS.md) n'[imyubakire ya tekiniki](docs/ARCHITECTURE.md). API irakoresha database kuri wallet proof gusa.
 
 ## Gutangira
 
@@ -28,6 +29,7 @@ Ibisabwa: Rust, `wasm32v1-none` target, na Stellar CLI ihuye na Soroban SDK v26.
 ```powershell
 cargo test --locked
 stellar contract build
+node scripts/test_wallet_api.mjs # isaba API ikora; irema konti z'igerageza
 cd web
 npm ci
 npm test
@@ -35,5 +37,7 @@ npm run dev
 ```
 
 Fungura `http://127.0.0.1:5173` muri browser ifite Freighter extension, uyishyire kuri testnet, hanyuma ukande **Huza Freighter**. Kuri browser itagira Freighter, UI yerekana icyo kubura; ntihimba wallet. `npm run build` igenzura production bundle.
+
+Gutangira API: muri `backend/`, banza `docker start ihuza-web3-postgres` niba itari gukora, hanyuma `cargo run --locked --bin ihuza-api`. `.env` ya development ibika `DATABASE_URL` ya database user ifite uburenganzira buke; Git irayirengagiza. API yumva kuri `127.0.0.1:3000` gusa. `node scripts/test_wallet_api.mjs` irema konti z'igerageza muri database ya local development.
 
 Nta mabanga ya wallet ashyirwa muri iyi repository. Nta RWF token, CBDC, EBM, bank, MTN cyangwa Airtel integration irimo. Iyimurika rigomba kwerekana prototype nk'uko iri, rikavuga neza ko ubwishyu nyabwo na Receipt Vault bitarubakwa.
