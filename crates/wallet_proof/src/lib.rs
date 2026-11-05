@@ -7,8 +7,8 @@ pub const TESTNET_PASSPHRASE: &str = "Test SDF Network ; September 2015";
 const SEP53_PREFIX: &[u8] = b"Stellar Signed Message:\n";
 const MAX_LIFETIME_SECONDS: u64 = 300;
 
-/// A server-issued challenge. The caller must generate a random nonce, store it
-/// against an authenticated IHUZA+ account, and consume it atomically on success.
+/// A server-issued challenge. The server must store it for one wallet login or
+/// account-link attempt and consume it atomically before granting access.
 pub struct Challenge {
     pub address: String,
     pub nonce_hex: String,
@@ -16,10 +16,37 @@ pub struct Challenge {
     pub expires_at: u64,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum IssueError {
+    InvalidAddress,
+    InvalidTime,
+    EntropyUnavailable,
+}
+
 impl Challenge {
+    /// Creates a fresh five-minute testnet challenge using the operating system RNG.
+    /// The server must persist it for one attempt before returning it.
+    pub fn issue(address: &str, issued_at: u64) -> Result<Self, IssueError> {
+        if PublicKey::from_string(address).is_err() {
+            return Err(IssueError::InvalidAddress);
+        }
+        if issued_at == 0 || issued_at.checked_add(MAX_LIFETIME_SECONDS).is_none() {
+            return Err(IssueError::InvalidTime);
+        }
+        let mut nonce = [0_u8; 32];
+        getrandom::getrandom(&mut nonce).map_err(|_| IssueError::EntropyUnavailable)?;
+        let nonce_hex = nonce.iter().map(|byte| format!("{byte:02x}")).collect();
+        Ok(Self {
+            address: address.to_owned(),
+            nonce_hex,
+            issued_at,
+            expires_at: issued_at + MAX_LIFETIME_SECONDS,
+        })
+    }
+
     pub fn message(&self) -> String {
         format!(
-            "IHUZA+ wallet link\nversion: 1\nnetwork: {TESTNET_PASSPHRASE}\naddress: {}\nnonce: {}\nissued_at: {}\nexpires_at: {}",
+            "IHUZA+ wallet ownership\nversion: 1\nnetwork: {TESTNET_PASSPHRASE}\naddress: {}\nnonce: {}\nissued_at: {}\nexpires_at: {}",
             self.address, self.nonce_hex, self.issued_at, self.expires_at
         )
     }
@@ -122,5 +149,28 @@ mod tests {
             verify_challenge(&malformed, 200, "bad"),
             Err(ProofError::InvalidChallenge)
         );
+    }
+
+    #[test]
+    fn issues_distinct_challenges_and_rejects_invalid_inputs() {
+        let first = Challenge::issue(ADDRESS, 1_000).unwrap();
+        let second = Challenge::issue(ADDRESS, 1_000).unwrap();
+        assert_eq!(first.nonce_hex.len(), 64);
+        assert!(first.nonce_hex.bytes().all(|byte| byte.is_ascii_hexdigit()));
+        assert_ne!(first.nonce_hex, second.nonce_hex);
+        assert_eq!(first.expires_at, 1_300);
+        assert!(first.message().contains(&format!("address: {ADDRESS}")));
+        assert!(matches!(
+            Challenge::issue("bad", 1_000),
+            Err(IssueError::InvalidAddress)
+        ));
+        assert!(matches!(
+            Challenge::issue(ADDRESS, 0),
+            Err(IssueError::InvalidTime)
+        ));
+        assert!(matches!(
+            Challenge::issue(ADDRESS, u64::MAX),
+            Err(IssueError::InvalidTime)
+        ));
     }
 }
