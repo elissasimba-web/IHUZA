@@ -98,6 +98,9 @@ try {
     method: 'POST', cookie: applicant.cookie, body: { proposed_name: 'Iduka Ryawe' },
   });
   assert.equal(application.status, 201);
+  assert.equal((await request(3001, '/merchant-products', { method: 'POST', cookie: applicant.cookie,
+    body: { name: 'Umuceri', unit_price: '1000.00' } })).status, 403);
+  assert.equal((await request(3001, `/merchant-products/${applicant.qr_reference}`)).status, 403);
   const target = `/merchant-review/${applicant.qr_reference}`;
   assert.equal((await request(3001, target, { cookie: outsiderSession.cookie })).status, 403);
   assert.equal((await request(3001, target, { cookie: applicant.cookie })).status, 403);
@@ -131,12 +134,25 @@ try {
     { account_kind: 'merchant', flow: 'unavailable' });
   assert.deepEqual(await (await request(3001, '/merchant-application', { cookie: applicant.cookie })).json(),
     { proposed_name: 'Iduka Ryawe', status: 'approved' });
+  assert.equal((await request(3001, '/merchant-products', { method: 'POST', cookie: applicant.cookie,
+    body: { name: 'Umuceri', unit_price: '0.00' } })).status, 400);
+  assert.equal((await request(3001, '/merchant-products', { method: 'POST', cookie: reviewerOne.cookie,
+    body: { name: 'Umuceri', unit_price: '1000.00' } })).status, 403);
+  const created = await request(3001, '/merchant-products', { method: 'POST', cookie: applicant.cookie,
+    body: { name: 'Umuceri', unit_price: '1000.50' } });
+  assert.equal(created.status, 201);
+  const product = await created.json();
+  assert.match(product.id, /^[0-9a-f-]{36}$/);
+  assert.deepEqual({ name: product.name, unit_price: product.unit_price, currency_code: product.currency_code },
+    { name: 'Umuceri', unit_price: '1000.50', currency_code: 'RWF' });
+  assert.deepEqual(await (await request(3001, `/merchant-products/${applicant.qr_reference}`)).json(), [product]);
 
   rotatedApi = startApi(3002, [reviewers[0].address, reviewers[1].address, outsider.address]);
   await waitForApi(3002, rotatedApi);
   assert.deepEqual(await (await request(3002, `/qr/${applicant.qr_reference}`)).json(),
     { account_kind: 'person', flow: 'person_transfer_preview' });
-  console.log('Merchant 2-of-3 review check passed: signer gate, self-approval, replay, quorum and reviewer-set rotation.');
+  assert.equal((await request(3002, `/merchant-products/${applicant.qr_reference}`)).status, 403);
+  console.log('Merchant review and catalog check passed: quorum, signer gate, replay, price validation and reviewer-set rotation.');
 } finally {
   rotatedApi?.kill();
   api?.kill();

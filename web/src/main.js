@@ -4,12 +4,14 @@ import { createOwnershipService } from './ownership.js';
 import { renderAccountQr, resolveAccountQr } from './account_qr.js';
 import { createMerchantApplicationService } from './merchant_application.js';
 import { createMerchantReviewService } from './merchant_review.js';
+import { createMerchantCatalogService } from './merchant_catalog.js';
 import './styles.css';
 
 const service = createWalletService({ getAddress, getNetworkDetails, isAllowed, isConnected, requestAccess, signMessage });
 const ownership = createOwnershipService(service);
 const merchantApplication = createMerchantApplicationService();
 const merchantReview = createMerchantReviewService(service);
+const merchantCatalog = createMerchantCatalogService();
 const badge = document.querySelector('#status-badge');
 const message = document.querySelector('#wallet-message');
 const details = document.querySelector('#wallet-details');
@@ -40,6 +42,13 @@ const reviewName = document.querySelector('#review-name');
 const reviewMessage = document.querySelector('#review-message');
 const reviewSignButton = document.querySelector('#review-sign-button');
 const reviewStatus = document.querySelector('#review-status');
+const merchantCatalogSection = document.querySelector('#merchant-catalog-section');
+const productForm = document.querySelector('#product-form');
+const productName = document.querySelector('#product-name');
+const productPrice = document.querySelector('#product-price');
+const productStatus = document.querySelector('#product-status');
+const ownProducts = document.querySelector('#own-products');
+const scanProducts = document.querySelector('#scan-products');
 
 const messages = {
   missing: ['Freighter ntiboneka', 'Shyira Freighter extension muri browser, hanyuma wongere ugenzure.'],
@@ -68,18 +77,43 @@ function clearOwnership() {
   reviewPreview.hidden = true;
   reviewReference.disabled = false;
   reviewStatus.textContent = '';
+  merchantCatalogSection.hidden = true;
+  ownProducts.replaceChildren();
+  productStatus.textContent = '';
   ownershipMessage.textContent = '';
+}
+
+function showProducts(list, products) {
+  list.replaceChildren();
+  for (const product of products) {
+    const item = document.createElement('li');
+    const name = document.createElement('span');
+    name.textContent = product.name;
+    const price = document.createElement('strong');
+    price.textContent = `${product.unit_price} RWF`;
+    item.append(name, price);
+    list.append(item);
+  }
 }
 
 async function refreshMerchantApplication() {
   merchantApplicationForm.hidden = true;
+  merchantCatalogSection.hidden = true;
   merchantApplicationStatus.textContent = 'Turagenzura ubusabe bw’umucuruzi...';
   try {
     const application = await merchantApplication.current();
     if (application) {
       merchantApplicationStatus.textContent = application.status === 'approved'
-        ? `Ubusabe bwa “${application.proposed_name}” bwemejwe n’abasuzuma babiri. Checkout n’ibiciro ntibirubakwa.`
+        ? `Ubusabe bwa “${application.proposed_name}” bwemejwe n’abasuzuma babiri. Ushobora gushyiraho ibicuruzwa; checkout ntirubakwa.`
         : `Ubusabe bwa “${application.proposed_name}” buracyasuzumwa. QR yawe iracyari iya konti isanzwe.`;
+      if (application.status === 'approved' && !ownershipResult.hidden) {
+        const reference = accountReference.textContent;
+        const products = await merchantCatalog.list(reference);
+        if (reference === accountReference.textContent && !ownershipResult.hidden) {
+          showProducts(ownProducts, products);
+          merchantCatalogSection.hidden = false;
+        }
+      }
     } else {
       merchantApplicationForm.hidden = false;
       merchantApplicationStatus.textContent = '';
@@ -134,6 +168,8 @@ async function restoreSession() {
     activeReview = null;
     reviewPreview.hidden = true;
     reviewReference.disabled = false;
+    merchantCatalogSection.hidden = true;
+    ownProducts.replaceChildren();
     return;
   }
   ownershipMessage.textContent = 'Session ya testnet irakora.';
@@ -230,6 +266,8 @@ logoutButton.addEventListener('click', async () => {
 scanForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   scanResult.textContent = 'Turagenzura reference ya konti...';
+  scanProducts.hidden = true;
+  scanProducts.replaceChildren();
   const button = scanForm.querySelector('button');
   button.disabled = true;
   try {
@@ -237,12 +275,38 @@ scanForm.addEventListener('submit', async (event) => {
     scanResult.textContent = result?.account_kind === 'person'
       ? 'Iyi ni konti isanzwe. Uburyo bwo kohereza amafaranga ntiburubakwa.'
       : result?.account_kind === 'merchant'
-        ? 'Iyi ni konti y’umucuruzi. Checkout itegereje kwemezwa no kubakwa.'
+        ? 'Iyi ni konti y’umucuruzi. Ibiciro biri muri catalog; checkout ntirubakwa.'
         : 'Reference ntiyabonetse cyangwa ntiyemewe.';
+    if (result?.account_kind === 'merchant') {
+      const products = await merchantCatalog.list(scanReference.value.trim());
+      showProducts(scanProducts, products);
+      scanProducts.hidden = false;
+      if (!products.length) scanResult.textContent = 'Iyi ni konti y’umucuruzi; nta bicuruzwa byashyizweho. Checkout ntirubakwa.';
+    }
   } catch {
     scanResult.textContent = 'Ntitwabashije kugenzura reference. Ongera ugerageze.';
   } finally {
     button.disabled = false;
+  }
+});
+productForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (busy || !activeAddress || merchantCatalogSection.hidden) return;
+  busy = true;
+  const button = productForm.querySelector('button');
+  button.disabled = true;
+  productStatus.textContent = 'Turabika igicuruzwa...';
+  try {
+    await merchantCatalog.create(productName.value.trim(), productPrice.value.trim());
+    showProducts(ownProducts, await merchantCatalog.list(accountReference.textContent));
+    productName.value = '';
+    productPrice.value = '';
+    productStatus.textContent = 'Igicuruzwa cyabitswe. Checkout ntirubakwa.';
+  } catch {
+    productStatus.textContent = 'Igicuruzwa nticyabitswe. Genzura izina, igiciro n’uko merchant yemewe.';
+  } finally {
+    button.disabled = false;
+    busy = false;
   }
 });
 merchantApplicationForm.addEventListener('submit', async (event) => {

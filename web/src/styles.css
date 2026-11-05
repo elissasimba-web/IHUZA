@@ -505,6 +505,30 @@ a {
   color:#e9f4f4;
   font:inherit
 }
+.catalog-section[hidden],.product-list[hidden] {
+  display:none
+}
+.catalog-section {
+  border-top:1px solid #ffffff18
+}
+.product-list {
+  list-style:none;
+  padding:0;
+  max-width:650px;
+  margin:18px 0 0
+}
+.product-list li {
+  display:flex;
+  justify-content:space-between;
+  gap:16px;
+  padding:13px 0;
+  border-bottom:1px solid #ffffff20;
+  color:#d8ece7
+}
+.product-list strong {
+  white-space:nowrap;
+  color:#a5f3c9
+}
 .roadmap {
   background:#071a25
 }

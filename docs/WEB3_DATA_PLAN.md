@@ -1,6 +1,6 @@
 # IHUZA+ — gahunda ya database nshya ya testnet
 
-Iyi ni gahunda n'amateka yo kubaka API na database ya Web3 testnet. Migrations `001_identity.sql` kugeza kuri `004_merchant_approval_votes.sql` zashyizwe muri `ihuza_web3_testnet` na `sqlx`. API ya localhost itanga challenge ikanagenzura proof, ikarema cyangwa igasoma konti muri transaction, ikanatanga session. Frontend ihuza Freighter kuri iyo API. `003` ibika merchant applications, `004` ikabika votes za reviewers; nta payment cyangwa wallet funds bibikwa hano.
+Iyi ni gahunda n'amateka yo kubaka API na database ya Web3 testnet. Migrations `001_identity.sql` kugeza kuri `005_merchant_products.sql` zashyizwe muri `ihuza_web3_testnet` na `sqlx`. API ya localhost itanga challenge ikanagenzura proof, ikarema cyangwa igasoma konti muri transaction, ikanatanga session. Frontend ihuza Freighter kuri iyo API. `003` ibika merchant applications, `004` ikabika votes za reviewers, `005` ikabika catalog n'ibiciro byanditswe n'umucuruzi; nta payment cyangwa wallet funds bibikwa hano.
 
 ## Gahunda yasuzumwe ya `002_sessions.sql`
 

@@ -526,6 +526,34 @@ fn valid_merchant_name(name: &str) -> bool {
     (2..=80).contains(&length) && name.trim() == name && !name.chars().any(char::is_control)
 }
 
+fn valid_product_name(name: &str) -> bool {
+    let length = name.chars().count();
+    (2..=120).contains(&length) && name.trim() == name && !name.chars().any(char::is_control)
+}
+
+fn canonical_price(value: &str) -> Option<String> {
+    let (whole, fraction) = value.split_once('.')?;
+    if whole.is_empty()
+        || whole.len() > 18
+        || (whole.len() > 1 && whole.starts_with('0'))
+        || !whole.bytes().all(|byte| byte.is_ascii_digit())
+        || fraction.is_empty()
+        || fraction.len() > 2
+        || !fraction.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return None;
+    }
+    let minor = match fraction.len() {
+        1 => format!("{fraction}0"),
+        2 => fraction.to_owned(),
+        _ => return None,
+    };
+    if whole == "0" && minor == "00" {
+        return None;
+    }
+    Some(format!("{whole}.{minor}"))
+}
+
 async fn approval_count(
     state: &AppState,
     account_id: &str,
@@ -812,6 +840,122 @@ async fn submit_merchant_application(
     ))
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CreateProductRequest {
+    name: String,
+    unit_price: String,
+}
+
+#[derive(Serialize)]
+struct ProductResponse {
+    id: String,
+    name: String,
+    unit_price: String,
+    currency_code: &'static str,
+}
+
+async fn approved_merchant(
+    state: &AppState,
+    account_id: &str,
+) -> Result<(), (StatusCode, Json<ErrorBody>)> {
+    let proposed_name: Option<String> = sqlx::query_scalar(
+        "SELECT proposed_name FROM merchant_applications WHERE account_id = $1::uuid",
+    )
+    .bind(account_id)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(internal_error)?;
+    let Some(proposed_name) = proposed_name else {
+        return Err(error(StatusCode::FORBIDDEN, "Merchant ntiyemejwe."));
+    };
+    if approval_count(state, account_id, &proposed_name).await? < 2 {
+        return Err(error(StatusCode::FORBIDDEN, "Merchant ntiyemejwe."));
+    }
+    Ok(())
+}
+
+async fn create_product(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(input): Json<CreateProductRequest>,
+) -> Result<(StatusCode, HeaderMap, Json<ProductResponse>), (StatusCode, Json<ErrorBody>)> {
+    require_origin(&headers)?;
+    if !valid_product_name(&input.name) {
+        return Err(error(
+            StatusCode::BAD_REQUEST,
+            "Izina ry'igicuruzwa ntiryemewe.",
+        ));
+    }
+    let unit_price = canonical_price(&input.unit_price)
+        .ok_or_else(|| error(StatusCode::BAD_REQUEST, "Igiciro nticyemewe."))?;
+    let account_id = session_account_id(&state.pool, &headers).await?;
+    approved_merchant(&state, &account_id).await?;
+    let row = sqlx::query(
+        "INSERT INTO merchant_products (merchant_account_id, name, unit_price) VALUES ($1::uuid, $2, $3::numeric) RETURNING id::text AS id, name, unit_price::text AS unit_price",
+    )
+    .bind(&account_id)
+    .bind(&input.name)
+    .bind(&unit_price)
+    .fetch_one(&state.pool)
+    .await
+    .map_err(internal_error)?;
+    let mut response_headers = HeaderMap::new();
+    response_headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    Ok((
+        StatusCode::CREATED,
+        response_headers,
+        Json(ProductResponse {
+            id: row.try_get("id").map_err(internal_error)?,
+            name: row.try_get("name").map_err(internal_error)?,
+            unit_price: row.try_get("unit_price").map_err(internal_error)?,
+            currency_code: "RWF",
+        }),
+    ))
+}
+
+async fn list_products(
+    State(state): State<AppState>,
+    Path(reference): Path<String>,
+) -> Result<(HeaderMap, Json<Vec<ProductResponse>>), (StatusCode, Json<ErrorBody>)> {
+    if reference.len() != 43
+        || !reference
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+    {
+        return Err(error(StatusCode::BAD_REQUEST, "QR reference ntiyemewe."));
+    }
+    let account_id: String =
+        sqlx::query_scalar("SELECT id::text FROM accounts WHERE qr_reference = $1")
+            .bind(&reference)
+            .fetch_optional(&state.pool)
+            .await
+            .map_err(internal_error)?
+            .ok_or_else(|| error(StatusCode::NOT_FOUND, "Konti ntiyabonetse."))?;
+    approved_merchant(&state, &account_id).await?;
+    let rows = sqlx::query(
+        "SELECT id::text AS id, name, unit_price::text AS unit_price FROM merchant_products WHERE merchant_account_id = $1::uuid ORDER BY created_at, id LIMIT 100",
+    )
+    .bind(&account_id)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(internal_error)?;
+    let products = rows
+        .into_iter()
+        .map(|row| {
+            Ok(ProductResponse {
+                id: row.try_get("id").map_err(internal_error)?,
+                name: row.try_get("name").map_err(internal_error)?,
+                unit_price: row.try_get("unit_price").map_err(internal_error)?,
+                currency_code: "RWF",
+            })
+        })
+        .collect::<Result<Vec<_>, (StatusCode, Json<ErrorBody>)>>()?;
+    let mut response_headers = HeaderMap::new();
+    response_headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    Ok((response_headers, Json(products)))
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenvy::dotenv().ok();
@@ -845,6 +989,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/api/merchant-application",
             get(get_merchant_application).post(submit_merchant_application),
         )
+        .route("/api/merchant-products", post(create_product))
+        .route("/api/merchant-products/{reference}", get(list_products))
         .layer(DefaultBodyLimit::max(4096))
         .with_state(AppState { pool, reviewers });
     let bind = std::env::var("IHUZA_API_BIND").unwrap_or_else(|_| "127.0.0.1:3000".to_owned());
@@ -859,7 +1005,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{qr_flow, valid_merchant_name};
+    use super::{canonical_price, qr_flow, valid_merchant_name, valid_product_name};
 
     #[test]
     fn merchant_qr_never_opens_checkout_without_approval() {
@@ -873,5 +1019,16 @@ mod tests {
         assert!(!valid_merchant_name(" A "));
         assert!(!valid_merchant_name("A\nB"));
         assert!(!valid_merchant_name("A"));
+    }
+
+    #[test]
+    fn product_price_is_decimal_and_positive() {
+        assert!(valid_product_name("Umuceri"));
+        assert!(!valid_product_name(" Umuceri "));
+        assert_eq!(canonical_price("1000.5"), Some("1000.50".to_owned()));
+        assert_eq!(canonical_price("0.01"), Some("0.01".to_owned()));
+        for price in ["0.00", "01.00", "1", "1.234", "-1.00", "1e3", "1,000.00"] {
+            assert!(canonical_price(price).is_none(), "{price}");
+        }
     }
 }

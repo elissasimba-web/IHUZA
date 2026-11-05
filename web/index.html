@@ -52,6 +52,14 @@
           <div class="section-heading"><div><p class="eyebrow">QR IMWE</p><h2 id="scan-title">Soma reference ya konti</h2></div><p>Shyiramo reference yasomwe muri QR ya IHUZA+. System izakwereka ubwoko bwa konti; nta kwishyura gukorwa hano.</p></div>
           <form id="scan-form" class="scan-form"><label for="scan-reference">Reference ya QR</label><div class="scan-actions"><input id="scan-reference" name="reference" type="text" maxlength="43" autocomplete="off" spellcheck="false" required /><button class="button button-primary" type="submit">Genzura konti</button></div></form>
           <p id="scan-result" class="fine-print" role="status" aria-live="polite"></p>
+          <ul id="scan-products" class="product-list" hidden></ul>
+        </section>
+
+        <section id="merchant-catalog-section" class="scan-section catalog-section" aria-labelledby="catalog-title" hidden>
+          <div class="section-heading"><div><p class="eyebrow">UMUCURUZI</p><h2 id="catalog-title">Ibicuruzwa byawe</h2></div><p>Ni wowe ushyiraho ibicuruzwa n'ibiciro. RWF hano yerekana igiciro gusa; nta kwishyura cyangwa RWF token biri muri iyi prototype.</p></div>
+          <form id="product-form" class="scan-form"><label for="product-name">Izina ry'igicuruzwa</label><div class="scan-actions"><input id="product-name" type="text" minlength="2" maxlength="120" required /><input id="product-price" type="text" inputmode="decimal" placeholder="Igiciro: 1000.00 RWF" aria-label="Igiciro muri RWF" required /><button class="button button-primary" type="submit">Ongeraho igicuruzwa</button></div></form>
+          <p id="product-status" class="fine-print" role="status" aria-live="polite"></p>
+          <ul id="own-products" class="product-list"></ul>
         </section>
 
         <section class="roadmap" aria-labelledby="roadmap-title"><div class="section-heading"><div><p class="eyebrow">AHO TUGANA</p><h2 id="roadmap-title">Konti imwe, serivisi nyinshi</h2></div><p>Ibi bikurikira biri mu cyerekezo cya product; ntibirakora muri iyi prototype.</p></div><div class="roadmap-grid"><article><span class="step-number">01</span><h3>Koherezanya</h3><p>Nyuma yo gusoma QR ya konti isanzwe, umukoresha azashobora gutegura ubwishyu yemera muri wallet ye.</p></article><article><span class="step-number">02</span><h3>Smart Invoice</h3><p>Umucuruzi azagena ibiciro; umukiriya ahitemo ibicuruzwa, server ibare total mbere yo kwemeza.</p></article><article><span class="step-number">03</span><h3>Receipt Vault</h3><p>Inyemezabwishyu zizabikwa nyuma y'ubwishyu bwagenzuwe, zikabonwa n'impande zombi.</p></article></div></section>
