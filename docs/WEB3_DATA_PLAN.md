@@ -1,6 +1,13 @@
 # IHUZA+ — gahunda ya database nshya ya testnet
 
-Iyi ni gahunda yo kubaka API na database ya Web3 testnet. `db/web3_testnet/001_identity.sql` yashyizwe muri `ihuza_web3_testnet` na `sqlx`; tables 4 zaremewe. API ya localhost itanga challenge ikanagenzura proof, ikarema cyangwa igasoma konti muri transaction. Nta session cyangwa frontend integration irimo.
+Iyi ni gahunda yo kubaka API na database ya Web3 testnet. `db/web3_testnet/001_identity.sql` na `002_sessions.sql` zashyizwe muri `ihuza_web3_testnet` na `sqlx`. API ya localhost itanga challenge ikanagenzura proof, ikarema cyangwa igasoma konti muri transaction, ikanatanga session. Frontend ihuza Freighter kuri iyo API.
+
+## Gahunda yasuzumwe ya `002_sessions.sql`
+
+- Ongera `account_sessions`: account ID, SHA-256 hash ya token ya random 256-bit, igihe yatangiwe, expiry itarenza amasaha 12, na `revoked_at`. Nta token mbisi cyangwa wallet secret ijya muri database. Token mbisi ihabwa browser muri `HttpOnly; SameSite=Strict` cookie; `Secure` izasabwa kuri HTTPS ya production. Iyi prototype ikora kuri localhost HTTP gusa.
+- Ongera `session_events` ya append-only (`created`, `revoked`) kugira ngo gufungura no gufunga session bisigire audit. Runtime role yemerewe SELECT/INSERT kuri events, SELECT/INSERT na UPDATE ya `revoked_at` gusa kuri sessions, nta DELETE. Migration igira database-name guard nk'iya mbere; `001_identity.sql` ntihindurwa.
+- Nyuma ya proof yemejwe, kora session muri transaction imwe n'account/challenge/audit. `GET /api/session` isoma cookie, igenzura hash, expiry na revocation; `POST /api/session/logout` ifunga session ikanahanagura cookie. POST requests zigenzura exact local Origin. Session ntisimbura umukono wa wallet ku mafaranga.
+- Mbere yo gukoresha migration: genzura SQL, ingaruka ku role, ko database ari `ihuza_web3_testnet`, n'uko API tests zikora. Nyuma yo kuyikoresha: genzura migration info, proof→session→logout→replay, ndetse ko database ibika hash y'uburebure bwa bytes 32 gusa. Nta migration yasibwe cyangwa yongeye kwandikwa.
 
 ## Ahazubakwa
 
@@ -19,9 +26,9 @@ Iyi ni gahunda yo kubaka API na database ya Web3 testnet. `db/web3_testnet/001_i
 
 ## Inzira y'umutekano ya API izubakwa
 
-1. `POST /wallet/challenges`: server igenzura testnet address, ishyiraho rate limit, ikora nonce ya 256-bit ivuye muri OS RNG, ikabika challenge mbere yo kohereza message umukoresha asinya. Inzira yo guhuza indi wallet na konti isaba session yemewe; login ya mbere ntisaba konti ya kera.
-2. `POST /wallet/proofs`: server isoma challenge yabitswe, igenzura expiry, network, address na SEP-53 signature. Muri transaction imwe ifunga row ya challenge, igenzura ko itarakoreshejwe, iyishyira `consumed`, ikanashyiraho cyangwa igasoma `wallet_links` na `accounts` ikurikije purpose. Gusubiramo proof birangwa.
-3. Session itangwa nyuma y'iyo transaction gusa. Guhindura wallet cyangwa kuyikuraho bizasaba proof nshya n'amategeko ya recovery azasuzumwa. SEP-53 yemeza urufunguzo rwasinye; kuri Stellar multisig ntihita yemeza uburenganzira bwose bwa konti.
+1. `POST /api/wallet/challenges`: server igenzura testnet address, ishyiraho rate limit, ikora nonce ya 256-bit ivuye muri OS RNG, ikabika challenge mbere yo kohereza message umukoresha asinya. Inzira yo guhuza indi wallet na konti isaba session yemewe; login ya mbere ntisaba konti ya kera.
+2. `POST /api/wallet/proofs`: server isoma challenge yabitswe, igenzura expiry, network, address na SEP-53 signature. Muri transaction imwe ifunga row ya challenge, igenzura ko itarakoreshejwe, iyishyira `consumed`, ikanashyiraho cyangwa igasoma `wallet_links` na `accounts` ikurikije purpose. Gusubiramo proof birangwa.
+3. Session itangwa muri iyo transaction; `GET /api/session` iyisoma, `POST /api/session/logout` iyifunga. Guhindura wallet cyangwa kuyikuraho bizasaba proof nshya n'amategeko ya recovery azasuzumwa. SEP-53 yemeza urufunguzo rwasinye; kuri Stellar multisig ntihita yemeza uburenganzira bwose bwa konti.
 4. Wallet proof si payment proof. Buri payment izasinywa na wallet, hanyuma igenzurwe byigenga kuri Stellar mbere ya Receipt Vault.
 
 ## Uko bizasuzumwa mbere yo gushyira migration mu bikorwa

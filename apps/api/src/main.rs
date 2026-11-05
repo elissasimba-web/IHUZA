@@ -1,12 +1,13 @@
 use axum::{
     extract::{DefaultBodyLimit, State},
-    http::StatusCode,
-    routing::post,
+    http::{header, HeaderMap, HeaderValue, StatusCode},
+    routing::{get, post},
     Json, Router,
 };
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use ihuza_wallet_proof::{verify_challenge, Challenge, TESTNET_PASSPHRASE};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use sqlx::{postgres::PgPoolOptions, PgPool, Row};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -21,6 +22,51 @@ struct ErrorBody {
 }
 
 type ApiResult<T> = Result<Json<T>, (StatusCode, Json<ErrorBody>)>;
+const WEB_ORIGIN: &str = "http://127.0.0.1:5173";
+const COOKIE_NAME: &str = "ihuza_session";
+
+fn require_origin(headers: &HeaderMap) -> Result<(), (StatusCode, Json<ErrorBody>)> {
+    if headers
+        .get(header::ORIGIN)
+        .and_then(|value| value.to_str().ok())
+        != Some(WEB_ORIGIN)
+    {
+        return Err(error(StatusCode::FORBIDDEN, "Origin ntiyemewe."));
+    }
+    Ok(())
+}
+
+fn session_hash(headers: &HeaderMap) -> Result<[u8; 32], (StatusCode, Json<ErrorBody>)> {
+    let cookie = headers
+        .get(header::COOKIE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|cookies| {
+            cookies
+                .split(';')
+                .find_map(|part| part.trim().strip_prefix(&format!("{COOKIE_NAME}=")))
+        })
+        .ok_or_else(|| error(StatusCode::UNAUTHORIZED, "Session ntiyemewe."))?;
+    let bytes = URL_SAFE_NO_PAD
+        .decode(cookie)
+        .map_err(|_| error(StatusCode::UNAUTHORIZED, "Session ntiyemewe."))?;
+    if bytes.len() != 32 {
+        return Err(error(StatusCode::UNAUTHORIZED, "Session ntiyemewe."));
+    }
+    Ok(Sha256::digest(&bytes).into())
+}
+
+fn set_cookie(value: &str, max_age: u32) -> Result<HeaderMap, (StatusCode, Json<ErrorBody>)> {
+    let mut headers = HeaderMap::new();
+    let cookie =
+        format!("{COOKIE_NAME}={value}; HttpOnly; SameSite=Strict; Path=/api; Max-Age={max_age}");
+    headers.insert(
+        header::SET_COOKIE,
+        HeaderValue::from_str(&cookie)
+            .map_err(|_| error(StatusCode::INTERNAL_SERVER_ERROR, "Cookie ntiyemewe."))?,
+    );
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    Ok(headers)
+}
 
 fn error(status: StatusCode, message: &'static str) -> (StatusCode, Json<ErrorBody>) {
     (status, Json(ErrorBody { error: message }))
@@ -61,8 +107,10 @@ struct ChallengeResponse {
 
 async fn issue_challenge(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(input): Json<ChallengeRequest>,
 ) -> ApiResult<ChallengeResponse> {
+    require_origin(&headers)?;
     let challenge = Challenge::issue(&input.address, unix_now()?)
         .map_err(|_| error(StatusCode::BAD_REQUEST, "Aderesi ya wallet ntiyemewe."))?;
     let mut tx = state.pool.begin().await.map_err(internal_error)?;
@@ -125,8 +173,10 @@ struct ProofResponse {
 
 async fn verify_proof(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(input): Json<ProofRequest>,
-) -> ApiResult<ProofResponse> {
+) -> Result<(HeaderMap, Json<ProofResponse>), (StatusCode, Json<ErrorBody>)> {
+    require_origin(&headers)?;
     if input.challenge_id.len() != 36 || input.signature_base64.len() > 200 {
         return Err(error(StatusCode::BAD_REQUEST, "Proof ntiyemewe."));
     }
@@ -220,12 +270,103 @@ async fn verify_proof(
         .execute(&mut *tx)
         .await
         .map_err(internal_error)?;
+    let mut token = [0_u8; 32];
+    getrandom::getrandom(&mut token)
+        .map_err(|_| error(StatusCode::INTERNAL_SERVER_ERROR, "Randomness ntiboneka."))?;
+    let token_hash: [u8; 32] = Sha256::digest(token).into();
+    let session_id: String = sqlx::query_scalar(
+        "INSERT INTO account_sessions (account_id, token_hash, expires_at) VALUES ($1::uuid, $2, now() + interval '12 hours') RETURNING id::text",
+    )
+    .bind(&account_id)
+    .bind(token_hash.as_slice())
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(internal_error)?;
+    sqlx::query("INSERT INTO session_events (session_id, event_kind) VALUES ($1::uuid, 'created')")
+        .bind(&session_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(internal_error)?;
     tx.commit().await.map_err(internal_error)?;
-    Ok(Json(ProofResponse {
-        account_id,
-        qr_reference,
-        status: "wallet_key_verified",
-    }))
+    let cookie = set_cookie(&URL_SAFE_NO_PAD.encode(token), 12 * 60 * 60)?;
+    Ok((
+        cookie,
+        Json(ProofResponse {
+            account_id,
+            qr_reference,
+            status: "wallet_key_verified",
+        }),
+    ))
+}
+
+#[derive(Serialize)]
+struct SessionResponse {
+    account_id: String,
+    qr_reference: String,
+    stellar_address: String,
+    expires_at: i64,
+}
+
+#[derive(Serialize)]
+struct LogoutResponse {
+    status: &'static str,
+}
+
+async fn read_session(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<(HeaderMap, Json<SessionResponse>), (StatusCode, Json<ErrorBody>)> {
+    let hash = session_hash(&headers)?;
+    let row = sqlx::query(
+        "SELECT a.id::text AS account_id, a.qr_reference, w.stellar_address, extract(epoch from s.expires_at)::bigint AS expires_at FROM account_sessions s JOIN accounts a ON a.id = s.account_id JOIN wallet_links w ON w.account_id = a.id WHERE s.token_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > now() AND w.network_passphrase = $2",
+    )
+    .bind(hash.as_slice())
+    .bind(TESTNET_PASSPHRASE)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(internal_error)?
+    .ok_or_else(|| error(StatusCode::UNAUTHORIZED, "Session ntiyemewe."))?;
+    let mut response_headers = HeaderMap::new();
+    response_headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    Ok((
+        response_headers,
+        Json(SessionResponse {
+            account_id: row.try_get("account_id").map_err(internal_error)?,
+            qr_reference: row.try_get("qr_reference").map_err(internal_error)?,
+            stellar_address: row.try_get("stellar_address").map_err(internal_error)?,
+            expires_at: row.try_get("expires_at").map_err(internal_error)?,
+        }),
+    ))
+}
+
+async fn logout(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<(HeaderMap, Json<LogoutResponse>), (StatusCode, Json<ErrorBody>)> {
+    require_origin(&headers)?;
+    let hash = session_hash(&headers)?;
+    let mut tx = state.pool.begin().await.map_err(internal_error)?;
+    let session_id: Option<String> = sqlx::query_scalar(
+        "UPDATE account_sessions SET revoked_at = now() WHERE token_hash = $1 AND revoked_at IS NULL AND expires_at > now() RETURNING id::text",
+    )
+    .bind(hash.as_slice())
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(internal_error)?;
+    let session_id =
+        session_id.ok_or_else(|| error(StatusCode::UNAUTHORIZED, "Session ntiyemewe."))?;
+    sqlx::query("INSERT INTO session_events (session_id, event_kind) VALUES ($1::uuid, 'revoked')")
+        .bind(&session_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(internal_error)?;
+    tx.commit().await.map_err(internal_error)?;
+    Ok((
+        set_cookie("", 0)?,
+        Json(LogoutResponse {
+            status: "signed_out",
+        }),
+    ))
 }
 
 #[tokio::main]
@@ -243,8 +384,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("Unexpected database".into());
     }
     let app = Router::new()
-        .route("/wallet/challenges", post(issue_challenge))
-        .route("/wallet/proofs", post(verify_proof))
+        .route("/api/wallet/challenges", post(issue_challenge))
+        .route("/api/wallet/proofs", post(verify_proof))
+        .route("/api/session", get(read_session))
+        .route("/api/session/logout", post(logout))
         .layer(DefaultBodyLimit::max(4096))
         .with_state(AppState { pool });
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000").await?;

@@ -11,5 +11,6 @@ dotenvy = "=0.15.7"
 getrandom = "=0.2.17"
 ihuza-wallet-proof = { path = "../../crates/wallet_proof" }
 serde = { version = "=1.0.229", features = ["derive"] }
+sha2 = "=0.10.9"
 sqlx = { version = "=0.9.0", default-features = false, features = ["postgres", "runtime-tokio", "tls-none"] }
 tokio = { version = "=1.53.1", features = ["macros", "net", "rt-multi-thread"] }

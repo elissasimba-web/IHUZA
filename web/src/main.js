@@ -20,6 +20,7 @@ const signButton = document.querySelector('#sign-button');
 const ownershipMessage = document.querySelector('#ownership-message');
 const ownershipResult = document.querySelector('#ownership-result');
 const accountReference = document.querySelector('#account-reference');
+const logoutButton = document.querySelector('#logout-button');
 
 const messages = {
   missing: ['Freighter ntiboneka', 'Shyira Freighter extension muri browser, hanyuma wongere ugenzure.'],
@@ -61,6 +62,22 @@ function render(state) {
   prepareButton.disabled = state.status !== 'ready';
 }
 
+async function restoreSession() {
+  if (!activeAddress) return;
+  const currentAddress = activeAddress;
+  const session = await ownership.session(currentAddress);
+  if (currentAddress !== activeAddress) return;
+  if (!session) {
+    if (!ownershipResult.hidden) ownershipMessage.textContent = 'Session yarangiye. Ongera wemeze wallet yawe.';
+    ownershipResult.hidden = true;
+    accountReference.textContent = '';
+    return;
+  }
+  accountReference.textContent = session.qr_reference;
+  ownershipResult.hidden = false;
+  ownershipMessage.textContent = 'Session ya testnet irakora.';
+}
+
 async function check(method) {
   if (busy) return;
   busy = true;
@@ -74,6 +91,7 @@ async function check(method) {
   network.textContent = '';
   try {
     render(await service[method]());
+    await restoreSession();
   } finally {
     busy = false;
     refreshButton.disabled = false;
@@ -132,5 +150,19 @@ connectButton.addEventListener('click', () => check('connect'));
 refreshButton.addEventListener('click', () => check('inspect'));
 prepareButton.addEventListener('click', prepareOwnership);
 signButton.addEventListener('click', signOwnership);
+logoutButton.addEventListener('click', async () => {
+  if (busy) return;
+  busy = true;
+  logoutButton.disabled = true;
+  const done = await ownership.logout();
+  if (done) {
+    clearOwnership();
+    ownershipMessage.textContent = 'Wasohotse muri IHUZA+.';
+  } else {
+    ownershipMessage.textContent = 'Ntitwabashije gufunga session. Ongera ugerageze.';
+  }
+  logoutButton.disabled = false;
+  busy = false;
+});
 window.addEventListener('focus', () => { if (!busy) check('inspect'); });
 check('inspect');

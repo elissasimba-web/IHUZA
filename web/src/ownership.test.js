@@ -29,7 +29,7 @@ test('only the exact server challenge is shown for signing', async () => {
   const service = createOwnershipService(wallet(), fetchImpl, () => 1100);
   assert.deepEqual(await service.prepare(address), { status: 'ready', challenge });
   assert.equal(calls[0].path, '/api/wallet/challenges');
-  assert.equal(calls[0].options.credentials, 'omit');
+  assert.equal(calls[0].options.credentials, 'same-origin');
 
   const wrong = createOwnershipService(wallet(), async () => ({ ok: true, json: async () => ({ ...challenge, network_passphrase: 'PUBLIC' }) }), () => 1100);
   assert.equal((await wrong.prepare(address)).status, 'error');
@@ -63,4 +63,22 @@ test('proof result is accepted only after wallet signing and server confirmation
 
   const rejected = createOwnershipService(wallet(), async () => ({ ok: false }), () => 1100);
   assert.equal((await rejected.submit(challenge)).status, 'error');
+});
+
+test('session belongs to the connected wallet and logout uses the same origin cookie', async () => {
+  const session = { account_id: '22222222-2222-4222-8222-222222222222', qr_reference: 'x'.repeat(43), stellar_address: address, expires_at: 1200 };
+  const calls = [];
+  const service = createOwnershipService(wallet(), async (path, options) => {
+    calls.push({ path, options });
+    return { ok: true, json: async () => session };
+  }, () => 1100);
+  assert.deepEqual(await service.session(address), session);
+  assert.equal(await service.session('G' + 'B'.repeat(55)), null);
+  assert.equal(await service.logout(), true);
+  assert.equal(calls[0].options.credentials, 'same-origin');
+  assert.equal(calls[2].path, '/api/session/logout');
+  assert.equal(calls[2].options.method, 'POST');
+
+  const expired = createOwnershipService(wallet(), async () => ({ ok: true, json: async () => ({ ...session, expires_at: 1100 }) }), () => 1100);
+  assert.equal(await expired.session(address), null);
 });

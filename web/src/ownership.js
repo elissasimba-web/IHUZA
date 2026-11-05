@@ -17,7 +17,7 @@ export function createOwnershipService(wallet, fetchImpl = fetch, now = () => Ma
     const response = await fetchImpl(`/api${path}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      credentials: 'omit',
+      credentials: 'same-origin',
       cache: 'no-store',
       body: JSON.stringify(body),
     });
@@ -26,6 +26,28 @@ export function createOwnershipService(wallet, fetchImpl = fetch, now = () => Ma
   }
 
   return {
+    async session(address) {
+      try {
+        const response = await fetchImpl('/api/session', { credentials: 'same-origin', cache: 'no-store' });
+        if (!response.ok) return null;
+        const result = await response.json();
+        if (result.stellar_address !== address || !uuid.test(result.account_id) || !qrPattern.test(result.qr_reference) ||
+            !Number.isSafeInteger(result.expires_at) || result.expires_at <= now()) return null;
+        return result;
+      } catch {
+        return null;
+      }
+    },
+    async logout() {
+      try {
+        const response = await fetchImpl('/api/session/logout', {
+          method: 'POST', credentials: 'same-origin', cache: 'no-store',
+        });
+        return response.ok;
+      } catch {
+        return false;
+      }
+    },
     async prepare(address) {
       if (globalThis.location && globalThis.location.origin !== WEB_ORIGIN) {
         return { status: 'error', message: 'Fungura IHUZA+ kuri origin ya testnet yemewe.' };
