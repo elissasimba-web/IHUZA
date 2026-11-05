@@ -18,6 +18,8 @@ Iyi nyandiko ivuga imyitwarire ya product izubakwa. Ntivuga ko ibyo byose byamaz
 
 ## Merchant checkout
 
+- Usaba kuba umucuruzi atanga izina ry'ubucuruzi, izina ry'uwabusabye, aho bukorera, nimero y'iyandikisha cyangwa TIN, n'izina ryemewe rya company iyo ari company. Aya makuru abanza gusuzumwa; ntabwo yandikwa muri QR cyangwa public catalog. Kopi y'icyemezo n'uburyo ibikwa biracyasaba icyemezo cyihariye. Reba `docs/MERCHANT_VERIFICATION_PLAN.md`.
+- Delivery no gutumiza ibicuruzwa imbere mu gihugu bizagira isuzuma ryihariye rya company yanditswe n'ibyangombwa byayo igihe icyo gice kizubakwa. Approval y'ubucuruzi isanzwe ntiyihita ifungura delivery.
 - Umucuruzi ni we wandika ibicuruzwa n'ibiciro bye. Umukiriya ahitamo item na quantity; server yongera kubara ibiciro na total.
 - Smart Invoice ibika immutable snapshots z'izina ry'ikicuruzwa, quantity, unit price, total, currency, merchant na customer aho azwi. Nta invoice QR ya kabiri.
 - Umukiriya yemera ibyo ahisemo mbere yo gusinya ubwishyu. Merchant ntasabwa kubanza kwemeza urutonde kugira ngo transaction ikorwe.

@@ -1,6 +1,6 @@
 # IHUZA+ merchant approval plan
 
-Iyi ni plan n'uko prototype ya review ihagaze kuri Stellar testnet. Nyiri project yemeje **reviewers 3 batandukanye, threshold ya 2-of-3**. `merchant_applications` ibika ubusabe; `merchant_approval_votes` ibika imikono ya reviewers. Inyandiko ya Governance isaba accountability, privacy, audit na compliance; ibimenyetso by'ubucuruzi byo ku mafaranga nyayo bizasobanurwa ukundi.
+Iyi ni plan n'uko prototype ya review ihagaze kuri Stellar testnet. Nyiri project yemeje **reviewers 3 batandukanye, threshold ya 2-of-3**. `merchant_applications` ibika ubusabe; `merchant_approval_votes` ibika imikono ya reviewers ku izina gusa. Amakuru mashya y'iyandikisha n'ibyangombwa biri muri `docs/MERCHANT_VERIFICATION_PLAN.md`; votes za kera ntizabyemeza. Inyandiko ya Governance isaba accountability, privacy, audit na compliance.
 
 ## Icyemezo cy'umucuruzi
 
