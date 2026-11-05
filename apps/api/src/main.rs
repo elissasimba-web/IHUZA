@@ -1,5 +1,5 @@
 use axum::{
-    extract::{DefaultBodyLimit, State},
+    extract::{DefaultBodyLimit, Path, State},
     http::{header, HeaderMap, HeaderValue, StatusCode},
     routing::{get, post},
     Json, Router,
@@ -369,6 +369,49 @@ async fn logout(
     ))
 }
 
+#[derive(Serialize)]
+struct QrResolution {
+    account_kind: String,
+    flow: &'static str,
+}
+
+fn qr_flow(account_kind: &str) -> &'static str {
+    match account_kind {
+        "person" => "person_transfer_preview",
+        // Merchant approval, catalog and checkout are not implemented yet.
+        _ => "unavailable",
+    }
+}
+
+async fn resolve_qr(
+    State(state): State<AppState>,
+    Path(reference): Path<String>,
+) -> Result<(HeaderMap, Json<QrResolution>), (StatusCode, Json<ErrorBody>)> {
+    if reference.len() != 43
+        || !reference
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+    {
+        return Err(error(StatusCode::BAD_REQUEST, "QR reference ntiyemewe."));
+    }
+    let account_kind: String =
+        sqlx::query_scalar("SELECT account_kind FROM accounts WHERE qr_reference = $1")
+            .bind(&reference)
+            .fetch_optional(&state.pool)
+            .await
+            .map_err(internal_error)?
+            .ok_or_else(|| error(StatusCode::NOT_FOUND, "Konti ntiyabonetse."))?;
+    let mut headers = HeaderMap::new();
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    Ok((
+        headers,
+        Json(QrResolution {
+            flow: qr_flow(&account_kind),
+            account_kind,
+        }),
+    ))
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenvy::dotenv().ok();
@@ -388,9 +431,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/wallet/proofs", post(verify_proof))
         .route("/api/session", get(read_session))
         .route("/api/session/logout", post(logout))
+        .route("/api/qr/{reference}", get(resolve_qr))
         .layer(DefaultBodyLimit::max(4096))
         .with_state(AppState { pool });
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000").await?;
     axum::serve(listener, app).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::qr_flow;
+
+    #[test]
+    fn merchant_qr_never_opens_checkout_without_approval() {
+        assert_eq!(qr_flow("person"), "person_transfer_preview");
+        assert_eq!(qr_flow("merchant"), "unavailable");
+    }
 }

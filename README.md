@@ -9,10 +9,10 @@ IHUZA+ ni umushinga wa serivisi z'imari n'iz'ubucuruzi ugenewe u Rwanda. Ubu iyi
 - Rust workspace irimo Soroban `intent_anchor` contract. Nyiri aderesi ya Stellar agomba kwemeza intent hash; contract igenzura igihe ntarengwa kandi ikumira gusubiramo iyo hash ikiri mu bubiko. Nta mafaranga iyi contract yimura.
 - `cargo test --locked --offline` yatsinze; `stellar contract build` yatanze Wasm. Nta contract yashyizwe kuri testnet cyangwa mainnet.
 - `scripts/check_stellar_testnet.ps1` ni read-only network probe; ntabwo ari payment integration.
-- `web/` ihuza Freighter kuri Stellar testnet, ikerekana challenge n'ubutumwa businywa mbere ya popup, ikagenzura network, origin, aderesi na signer, hanyuma ikohereza signature kuri API. Nta transaction ikora.
+- `web/` ihuza Freighter kuri Stellar testnet, ikerekana challenge n'ubutumwa businywa mbere ya popup, ikagenzura network, origin, aderesi na signer, hanyuma ikohereza signature kuri API. Ishushanya QR imwe y'account reference muri browser kandi ishobora kugenzura reference yanditswe n'umukoresha. Nta transaction ikora.
 - `crates/wallet_proof` itanga nonce ya 256-bit ivuye muri OS RNG, ikanagenzura umukono wa SEP-53 kuri challenge ya Stellar testnet n'igihe imara.
 - PostgreSQL database `ihuza_web3_testnet` iri muri container `ihuza-web3-postgres`; migrations `001_identity.sql` na `002_sessions.sql` zashyizweho na `sqlx`. Irimo identity na session metadata gusa, nta wallet funds cyangwa payment records. Reba [gahunda ya database](docs/WEB3_DATA_PLAN.md).
-- `apps/api` ifite endpoints za localhost `/api/wallet/challenges`, `/api/wallet/proofs`, `/api/session` na `/api/session/logout`: ibika nonce, igenzura umukono, ikora konti ifite QR reference imwe, ikumira replay, kandi itanga session y'amasaha 12 ifungwa na logout. Database ibika hash ya session token gusa. Igeragezwa rya end-to-end ryatsinze, harimo requests ebyiri zigeze icyarimwe. Nta payment cyangwa merchant checkout irimo. Freighter nyayo ntirageragezwa muri browser ifite extension.
+- `apps/api` ifite endpoints za localhost `/api/wallet/challenges`, `/api/wallet/proofs`, `/api/session`, `/api/session/logout` na `/api/qr/{reference}`: ibika nonce, igenzura umukono, ikora konti ifite QR reference imwe, ikumira replay, itanga session y'amasaha 12, kandi isobanura QR reference. Kuri konti isanzwe itanga preview gusa; merchant checkout ntifungurwa kuko approval na catalog bitarubakwa. Database ibika hash ya session token gusa. Igeragezwa rya end-to-end ryatsinze, harimo requests ebyiri zigeze icyarimwe. Nta payment irimo. Freighter nyayo ntirageragezwa muri browser ifite extension.
 
 ## Ibyo project izubaka
 
@@ -20,7 +20,7 @@ Umukiriya azakoresha wallet yigenzurira, ascan-e **QR imwe ihoraho** ya konti y'
 
 Merchant Assistant izafasha umucuruzi kwandika suppliers, procurement, stock movements, ibicuruzwa, sales na reports. Ibyo byose n'inyandiko z'abakiriya bizabikwa mu buryo burinda amakuru yihariye; si ngombwa kubishyira kuri blockchain.
 
-Reba [ibyo twemeranyijwe ku bicuruzwa](docs/PRODUCT_REQUIREMENTS.md) n'[imyubakire ya tekiniki](docs/ARCHITECTURE.md). API irakoresha database kuri wallet proof gusa.
+Reba [ibyo twemeranyijwe ku bicuruzwa](docs/PRODUCT_REQUIREMENTS.md) n'[imyubakire ya tekiniki](docs/ARCHITECTURE.md). API irakoresha database kuri identity, session na QR resolver gusa.
 
 ## Gutangira
 

@@ -42,13 +42,19 @@
                 <button id="sign-button" class="button button-primary" type="button">Sinyira muri Freighter</button>
               </div>
               <p id="ownership-message" class="fine-print" role="status" aria-live="polite"></p>
-              <div id="ownership-result" class="ownership-result" hidden><span>Urufunguzo rwa wallet rwemejwe</span><code id="account-reference"></code><p>Session ya testnet irakora. QR yo guscan-a n'ubwishyu ntibirubakwa.</p><button id="logout-button" class="button button-secondary" type="button">Sohoka muri IHUZA+</button></div>
+              <div id="ownership-result" class="ownership-result" hidden><span>QR imwe ya konti yawe</span><canvas id="account-qr" class="account-qr" role="img" aria-label="QR ya konti ya IHUZA+" hidden></canvas><code id="account-reference"></code><p>QR irimo iyi reference gusa. Session ya testnet irakora; kohereza amafaranga ntibirubakwa.</p><button id="logout-button" class="button button-secondary" type="button">Sohoka muri IHUZA+</button></div>
             </div>
             <p class="fine-print">Niba Freighter itari muri browser, <a href="https://freighter.app/" target="_blank" rel="noopener noreferrer">yikure ku rubuga rwayo</a>. Iyi prototype ikora kuri Stellar testnet gusa; nta transaction cyangwa ubwishyu ikora.</p>
           </div>
         </section>
 
-        <section class="roadmap" aria-labelledby="roadmap-title"><div class="section-heading"><div><p class="eyebrow">AHO TUGANA</p><h2 id="roadmap-title">Konti imwe, serivisi nyinshi</h2></div><p>Ibi bikurikira biri mu cyerekezo cya product; ntibirakora muri iyi prototype.</p></div><div class="roadmap-grid"><article><span class="step-number">01</span><h3>QR imwe</h3><p>Scan ya konti izafungura uburyo bwo kwishyurana bukwiranye n'umukiriya cyangwa umucuruzi wemewe.</p></article><article><span class="step-number">02</span><h3>Smart Invoice</h3><p>Umucuruzi azagena ibiciro; umukiriya ahitemo ibicuruzwa, server ibare total mbere yo kwemeza.</p></article><article><span class="step-number">03</span><h3>Receipt Vault</h3><p>Inyemezabwishyu zizabikwa nyuma y'ubwishyu bwagenzuwe, zikabonwa n'impande zombi.</p></article></div></section>
+        <section class="scan-section" aria-labelledby="scan-title">
+          <div class="section-heading"><div><p class="eyebrow">QR IMWE</p><h2 id="scan-title">Soma reference ya konti</h2></div><p>Shyiramo reference yasomwe muri QR ya IHUZA+. System izakwereka ubwoko bwa konti; nta kwishyura gukorwa hano.</p></div>
+          <form id="scan-form" class="scan-form"><label for="scan-reference">Reference ya QR</label><div class="scan-actions"><input id="scan-reference" name="reference" type="text" maxlength="43" autocomplete="off" spellcheck="false" required /><button class="button button-primary" type="submit">Genzura konti</button></div></form>
+          <p id="scan-result" class="fine-print" role="status" aria-live="polite"></p>
+        </section>
+
+        <section class="roadmap" aria-labelledby="roadmap-title"><div class="section-heading"><div><p class="eyebrow">AHO TUGANA</p><h2 id="roadmap-title">Konti imwe, serivisi nyinshi</h2></div><p>Ibi bikurikira biri mu cyerekezo cya product; ntibirakora muri iyi prototype.</p></div><div class="roadmap-grid"><article><span class="step-number">01</span><h3>Koherezanya</h3><p>Nyuma yo gusoma QR ya konti isanzwe, umukoresha azashobora gutegura ubwishyu yemera muri wallet ye.</p></article><article><span class="step-number">02</span><h3>Smart Invoice</h3><p>Umucuruzi azagena ibiciro; umukiriya ahitemo ibicuruzwa, server ibare total mbere yo kwemeza.</p></article><article><span class="step-number">03</span><h3>Receipt Vault</h3><p>Inyemezabwishyu zizabikwa nyuma y'ubwishyu bwagenzuwe, zikabonwa n'impande zombi.</p></article></div></section>
       </main>
       <footer><span>IHUZA Digital ELI Technologies Ltd</span><span>Prototype · Stellar testnet · Nta mafaranga nyayo</span></footer>
     </div>

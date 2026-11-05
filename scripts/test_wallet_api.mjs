@@ -86,6 +86,12 @@ const accepted = await post('/wallet/proofs', {
 assert.equal(accepted.status, 200, JSON.stringify(accepted.body));
 assert.equal(accepted.body.status, 'wallet_key_verified');
 assert.match(accepted.body.qr_reference, /^[A-Za-z0-9_-]{43}$/);
+const resolved = await fetch(`${api}/qr/${accepted.body.qr_reference}`);
+assert.equal(resolved.status, 200);
+assert.equal(resolved.headers.get('cache-control'), 'no-store');
+assert.deepEqual(await resolved.json(), { account_kind: 'person', flow: 'person_transfer_preview' });
+assert.equal((await fetch(`${api}/qr/bad`)).status, 400);
+assert.equal((await fetch(`${api}/qr/${'z'.repeat(43)}`)).status, 404);
 assert.match(accepted.cookie, /^ihuza_session=[A-Za-z0-9_-]{43}; HttpOnly; SameSite=Strict; Path=\/api; Max-Age=43200$/);
 const cookie = accepted.cookie.split(';')[0];
 const session = await fetch(`${api}/session`, { headers: { cookie } });
@@ -127,4 +133,4 @@ const concurrent = await Promise.all([
 ]);
 assert.deepEqual(concurrent.map((result) => result.status).sort(), [200, 409]);
 
-console.log('Wallet API integration check passed: issue, reject, accept, session, logout, replay, concurrent replay, stable account QR.');
+console.log('Wallet API integration check passed: issue, reject, accept, QR resolution, session, logout, replay, concurrent replay.');

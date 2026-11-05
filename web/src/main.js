@@ -1,6 +1,7 @@
 import { getAddress, getNetworkDetails, isAllowed, isConnected, requestAccess, signMessage } from '@stellar/freighter-api';
 import { createWalletService } from './wallet.js';
 import { createOwnershipService } from './ownership.js';
+import { renderAccountQr, resolveAccountQr } from './account_qr.js';
 import './styles.css';
 
 const service = createWalletService({ getAddress, getNetworkDetails, isAllowed, isConnected, requestAccess, signMessage });
@@ -21,6 +22,10 @@ const ownershipMessage = document.querySelector('#ownership-message');
 const ownershipResult = document.querySelector('#ownership-result');
 const accountReference = document.querySelector('#account-reference');
 const logoutButton = document.querySelector('#logout-button');
+const accountQr = document.querySelector('#account-qr');
+const scanForm = document.querySelector('#scan-form');
+const scanReference = document.querySelector('#scan-reference');
+const scanResult = document.querySelector('#scan-result');
 
 const messages = {
   missing: ['Freighter ntiboneka', 'Shyira Freighter extension muri browser, hanyuma wongere ugenzure.'],
@@ -41,7 +46,20 @@ function clearOwnership() {
   signButton.disabled = true;
   ownershipResult.hidden = true;
   accountReference.textContent = '';
+  accountQr.hidden = true;
   ownershipMessage.textContent = '';
+}
+
+async function showAccountQr(reference) {
+  accountReference.textContent = reference;
+  accountQr.hidden = true;
+  try {
+    await renderAccountQr(accountQr, reference);
+    accountQr.hidden = false;
+  } catch {
+    ownershipMessage.textContent = 'QR ntiyashushanyijwe. Reference ya konti iraboneka.';
+  }
+  ownershipResult.hidden = false;
 }
 
 function render(state) {
@@ -71,11 +89,11 @@ async function restoreSession() {
     if (!ownershipResult.hidden) ownershipMessage.textContent = 'Session yarangiye. Ongera wemeze wallet yawe.';
     ownershipResult.hidden = true;
     accountReference.textContent = '';
+    accountQr.hidden = true;
     return;
   }
-  accountReference.textContent = session.qr_reference;
-  ownershipResult.hidden = false;
   ownershipMessage.textContent = 'Session ya testnet irakora.';
+  await showAccountQr(session.qr_reference);
 }
 
 async function check(method) {
@@ -133,9 +151,8 @@ async function signOwnership() {
     if (result.status === 'verified') {
       activeChallenge = null;
       challengePreview.hidden = true;
-      accountReference.textContent = result.qr_reference;
-      ownershipResult.hidden = false;
       ownershipMessage.textContent = 'Umukono wagenzuwe na IHUZA+ API.';
+      await showAccountQr(result.qr_reference);
     } else {
       clearOwnership();
       ownershipMessage.textContent = result.message;
@@ -163,6 +180,24 @@ logoutButton.addEventListener('click', async () => {
   }
   logoutButton.disabled = false;
   busy = false;
+});
+scanForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  scanResult.textContent = 'Turagenzura reference ya konti...';
+  const button = scanForm.querySelector('button');
+  button.disabled = true;
+  try {
+    const result = await resolveAccountQr(scanReference.value.trim());
+    scanResult.textContent = result?.account_kind === 'person'
+      ? 'Iyi ni konti isanzwe. Uburyo bwo kohereza amafaranga ntiburubakwa.'
+      : result?.account_kind === 'merchant'
+        ? 'Iyi ni konti y’umucuruzi. Checkout itegereje kwemezwa no kubakwa.'
+        : 'Reference ntiyabonetse cyangwa ntiyemewe.';
+  } catch {
+    scanResult.textContent = 'Ntitwabashije kugenzura reference. Ongera ugerageze.';
+  } finally {
+    button.disabled = false;
+  }
 });
 window.addEventListener('focus', () => { if (!busy) check('inspect'); });
 check('inspect');
