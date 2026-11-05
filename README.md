@@ -9,10 +9,10 @@ IHUZA+ ni umushinga wa serivisi z'imari n'iz'ubucuruzi ugenewe u Rwanda. Ubu iyi
 - Rust workspace irimo Soroban `intent_anchor` contract. Nyiri aderesi ya Stellar agomba kwemeza intent hash; contract igenzura igihe ntarengwa kandi ikumira gusubiramo iyo hash ikiri mu bubiko. Nta mafaranga iyi contract yimura.
 - `cargo test --locked --offline` yatsinze; `stellar contract build` yatanze Wasm. Nta contract yashyizwe kuri testnet cyangwa mainnet.
 - `scripts/check_stellar_testnet.ps1` ni read-only network probe; ntabwo ari payment integration.
-- `web/` ifite frontend ihuza Freighter wallet kandi ikemeza ko iri kuri Stellar testnet. Yerekana public address gusa; nta transaction ikora kandi nta konti ya IHUZA+ ihuzwa na wallet kugeza ubu.
+- `web/` ihuza Freighter kuri Stellar testnet, ikerekana challenge n'ubutumwa businywa mbere ya popup, ikagenzura network, origin, aderesi na signer, hanyuma ikohereza signature kuri API. Nta transaction ikora.
 - `crates/wallet_proof` itanga nonce ya 256-bit ivuye muri OS RNG, ikanagenzura umukono wa SEP-53 kuri challenge ya Stellar testnet n'igihe imara.
 - PostgreSQL database `ihuza_web3_testnet` iri muri container `ihuza-web3-postgres`; `db/web3_testnet/001_identity.sql` yashyizweho na `sqlx`, ikora tables 4. Irimo identity metadata gusa, nta wallet funds cyangwa payment records. Reba [gahunda ya database](docs/WEB3_DATA_PLAN.md).
-- `apps/api` ifite endpoints za localhost `/wallet/challenges` na `/wallet/proofs`: ibika nonce, igenzura umukono, ikora konti ifite QR reference imwe, kandi ikumira replay muri database transaction. Igeragezwa rya end-to-end ryatsinze, harimo requests ebyiri zigeze icyarimwe. Nta session, wallet UI connection, payment cyangwa merchant checkout irimo.
+- `apps/api` ifite endpoints za localhost `/wallet/challenges` na `/wallet/proofs`: ibika nonce, igenzura umukono, ikora konti ifite QR reference imwe, kandi ikumira replay muri database transaction. Igeragezwa rya end-to-end ryatsinze, harimo requests ebyiri zigeze icyarimwe. Nta session, payment cyangwa merchant checkout irimo. Freighter nyayo ntirageragezwa muri browser ifite extension.
 
 ## Ibyo project izubaka
 
@@ -36,7 +36,7 @@ npm test
 npm run dev
 ```
 
-Fungura `http://127.0.0.1:5173` muri browser ifite Freighter extension, uyishyire kuri testnet, hanyuma ukande **Huza Freighter**. Kuri browser itagira Freighter, UI yerekana icyo kubura; ntihimba wallet. `npm run build` igenzura production bundle.
+Fungura `http://127.0.0.1:5173` muri browser ifite Freighter extension, uyishyire kuri testnet, hanyuma ukande **Huza Freighter**. Ushobora gutegura ubutumwa, kubusoma no guhitamo kubusinyira muri Freighter. API na Vite bigomba kuba bikora icyarimwe. Kuri browser itagira Freighter, UI yerekana icyo kubura; ntihimba wallet. `npm run build` igenzura production bundle. Vite proxy ikora muri local development gusa; production izakenera HTTPS n'origin yayo iri mu butumwa businywa.
 
 Gutangira API: muri `backend/`, banza `docker start ihuza-web3-postgres` niba itari gukora, hanyuma `cargo run --locked --bin ihuza-api`. `.env` ya development ibika `DATABASE_URL` ya database user ifite uburenganzira buke; Git irayirengagiza. API yumva kuri `127.0.0.1:3000` gusa. `node scripts/test_wallet_api.mjs` irema konti z'igerageza muri database ya local development.
 

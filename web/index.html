@@ -26,13 +26,25 @@
         </section>
 
         <section class="wallet-section" aria-labelledby="wallet-title">
-          <div class="section-heading"><div><p class="eyebrow">INTAMBWE YA MBERE</p><h2 id="wallet-title">Huza wallet yawe</h2></div><p>Freighter extension ni yo isaba uburenganzira bwawe. IHUZA+ ibona aderesi rusange gusa.</p></div>
+          <div class="section-heading"><div><p class="eyebrow">INTAMBWE YA MBERE</p><h2 id="wallet-title">Huza wallet yawe</h2></div><p>Freighter ni yo igusaba uburenganzira bwo gusinya. IHUZA+ igenzura aderesi rusange n'umukono, ntibona urufunguzo rwawe rw'ibanga.</p></div>
           <div class="wallet-card">
             <div class="wallet-card-top"><div class="wallet-icon" aria-hidden="true">✦</div><div><span class="card-kicker">WALLET CONNECTION</span><h3>Freighter</h3></div><span id="status-badge" class="status-badge">Biragenzurwa</span></div>
             <p id="wallet-message" class="wallet-message" role="status" aria-live="polite">Turagenzura niba Freighter iboneka muri iyi browser...</p>
             <div id="wallet-details" class="wallet-details" hidden><div><span>Aderesi rusange</span><code id="wallet-address"></code></div><div><span>Network</span><strong id="wallet-network"></strong></div></div>
             <div class="wallet-actions"><button id="connect-button" class="button button-primary" type="button">Huza Freighter <span aria-hidden="true">↗</span></button><button id="refresh-button" class="button button-secondary" type="button">Ongera ugenzure</button></div>
-            <p class="fine-print">Niba Freighter itari muri browser, <a href="https://freighter.app/" target="_blank" rel="noopener noreferrer">yikure ku rubuga rwayo</a>. Guhuza wallet ntibikora transaction, ntibishyura kandi ntibihuza aderesi yawe na konti ya IHUZA+ kugeza uburyo bwo kwemeza ownership bwubatswe.</p>
+            <div id="ownership-panel" class="ownership-panel" hidden>
+              <h4>Emeza ko wallet ari iyawe</h4>
+              <p>IHUZA+ izaguha ubutumwa bwa testnet. Banza ubusome, hanyuma uhitemo kubusinyira muri Freighter. Gusinya ubu butumwa ntikwimura amafaranga.</p>
+              <button id="prepare-button" class="button button-secondary" type="button">Tegura ubutumwa</button>
+              <div id="challenge-preview" class="challenge-preview" hidden>
+                <span>Ubutumwa uzabona muri Freighter</span>
+                <pre id="challenge-message"></pre>
+                <button id="sign-button" class="button button-primary" type="button">Sinyira muri Freighter</button>
+              </div>
+              <p id="ownership-message" class="fine-print" role="status" aria-live="polite"></p>
+              <div id="ownership-result" class="ownership-result" hidden><span>Urufunguzo rwa wallet rwemejwe</span><code id="account-reference"></code><p>Konti ya testnet yabonetse. QR yo guscan-a, session n'ubwishyu ntibirubakwa.</p></div>
+            </div>
+            <p class="fine-print">Niba Freighter itari muri browser, <a href="https://freighter.app/" target="_blank" rel="noopener noreferrer">yikure ku rubuga rwayo</a>. Iyi prototype ikora kuri Stellar testnet gusa; nta transaction cyangwa ubwishyu ikora.</p>
           </div>
         </section>
 

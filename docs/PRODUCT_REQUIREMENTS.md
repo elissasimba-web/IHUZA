@@ -9,6 +9,13 @@ Iyi nyandiko ivuga imyitwarire ya product izubakwa. Ntivuga ko ibyo byose byamaz
 - Nyiri wallet ni we usinya buri gikorwa cyimura value. App login cyangwa ADMIN ntibisimbura uburenganzira bwa wallet kandi ntibika seed/private key.
 - Serivisi za mbere zikora online gusa. Nta kwishyura offline cyangwa automatic debit.
 
+## Umutekano wa wallet
+
+- Umukoresha agomba gusoma no kwemeza icyo asinyira. Wallet ownership message igomba kuvuga origin, network, aderesi, impamvu n'igihe irangirira; sign request ntihita yoherezwa wallet imaze guhuza gusa.
+- Mbere ya buri payment izubakwa, UI izerekana recipient, asset, amount, network, fees na expiry mu buryo bwumvikana. Guhindura kimwe muri byo bisaba uburenganzira bushya bwa wallet. API ntishobora gusinya mu izina ry'umukoresha.
+- IHUZA+ izagira rate limits, audit, kugenzura chain result, alerts n'uburyo bwo gukuraho sessions. Gufunga access ya IHUZA+ ntibivuga ko server yafashe cyangwa yashoboye kwimura amafaranga yo muri self-custody wallet.
+- Recovery ya konti na wallet nyinshi bizasobanurwa mbere yo kubishyira mu bikorwa. ADMIN wenyine ntashobora kwimurira wallet y'umukoresha ahandi cyangwa kuyikuramo amafaranga.
+
 ## Merchant checkout
 
 - Umucuruzi ni we wandika ibicuruzwa n'ibiciro bye. Umukiriya ahitamo item na quantity; server yongera kubara ibiciro na total.

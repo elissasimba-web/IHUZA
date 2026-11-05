@@ -4,6 +4,7 @@ use sha2::{Digest, Sha256};
 use stellar_strkey::ed25519::PublicKey;
 
 pub const TESTNET_PASSPHRASE: &str = "Test SDF Network ; September 2015";
+pub const WEB_ORIGIN: &str = "http://127.0.0.1:5173";
 const SEP53_PREFIX: &[u8] = b"Stellar Signed Message:\n";
 const MAX_LIFETIME_SECONDS: u64 = 300;
 
@@ -46,7 +47,7 @@ impl Challenge {
 
     pub fn message(&self) -> String {
         format!(
-            "IHUZA+ wallet ownership\nversion: 1\nnetwork: {TESTNET_PASSPHRASE}\naddress: {}\nnonce: {}\nissued_at: {}\nexpires_at: {}",
+            "IHUZA+ wallet ownership\nversion: 2\norigin: {WEB_ORIGIN}\npurpose: wallet ownership only; no payment\nnetwork: {TESTNET_PASSPHRASE}\naddress: {}\nnonce: {}\nissued_at: {}\nexpires_at: {}",
             self.address, self.nonce_hex, self.issued_at, self.expires_at
         )
     }
@@ -160,6 +161,7 @@ mod tests {
         assert_ne!(first.nonce_hex, second.nonce_hex);
         assert_eq!(first.expires_at, 1_300);
         assert!(first.message().contains(&format!("address: {ADDRESS}")));
+        assert!(first.message().contains(&format!("origin: {WEB_ORIGIN}")));
         assert!(matches!(
             Challenge::issue("bad", 1_000),
             Err(IssueError::InvalidAddress)

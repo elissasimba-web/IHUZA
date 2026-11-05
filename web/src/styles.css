@@ -347,6 +347,68 @@ a {
   line-height:1.6;
   margin:22px 0 0
 }
+.ownership-panel {
+  margin-top:25px;
+  padding:23px;
+  border:1px solid #80d5ba40;
+  border-radius:16px;
+  background:#071d28
+}
+.ownership-panel[hidden],.challenge-preview[hidden],.ownership-result[hidden] {
+  display:none
+}
+.ownership-panel h4 {
+  font-size:18px;
+  margin:0 0 9px
+}
+.ownership-panel>p {
+  color:#a9c6c7;
+  font-size:13px;
+  line-height:1.6;
+  margin:0 0 16px
+}
+.challenge-preview {
+  margin-top:19px
+}
+.challenge-preview>span,.ownership-result>span {
+  display:block;
+  color:#91bcba;
+  font-size:11px;
+  font-weight:800;
+  margin-bottom:9px
+}
+.challenge-preview pre {
+  overflow-wrap:anywhere;
+  white-space:pre-wrap;
+  max-height:270px;
+  overflow:auto;
+  padding:15px;
+  border-radius:10px;
+  border:1px solid #ffffff20;
+  color:#b5f5d0;
+  background:#061720;
+  font-size:12px;
+  line-height:1.5
+}
+.ownership-result {
+  margin-top:18px;
+  padding:16px;
+  border:1px solid #5fdb9b58;
+  border-radius:11px;
+  background:#276b4e26
+}
+.ownership-result code {
+  display:block;
+  overflow-wrap:anywhere;
+  color:#b5f5d0;
+  font-size:12px
+}
+.ownership-result p {
+  font-size:12px;
+  color:#a9c6c7;
+  line-height:1.5;
+  margin:12px 0 0
+}
 .roadmap {
   background:#071a25
 }

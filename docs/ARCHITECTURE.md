@@ -2,9 +2,9 @@
 
 ## Aho tugeze
 
-Iri shami rifite Soroban `intent_anchor` contract, read-only testnet probe, frontend ihuza Freighter wallet kuri testnet ikerekana public address, Rust library igenzura SEP-53 wallet signature, database ya testnet ifite identity tables 4, na API ya localhost itanga kandi ikemeza wallet challenges. Iyo proof yemejwe, API ikora konti ifite QR reference ihoraho cyangwa igasoma iyariho. Nta session, QR resolver, chain indexer, payment cyangwa Receipt Vault birimo. Mu iyimurika bigomba kuvugwa uko biri.
+Iri shami rifite Soroban `intent_anchor` contract, read-only testnet probe, frontend ihuza Freighter wallet kuri testnet ikayisaba gusinya challenge umukoresha amaze gusoma, Rust library igenzura SEP-53 signature, database ya testnet ifite identity tables 4, na API ya localhost itanga kandi ikemeza wallet challenges. Iyo proof yemejwe, API ikora konti ifite QR reference ihoraho cyangwa igasoma iyariho. Nta session, QR resolver, chain indexer, payment cyangwa Receipt Vault birimo. Mu iyimurika bigomba kuvugwa uko biri.
 
-PostgreSQL ya `ihuza_web3_testnet` ibika identity metadata na challenges. API iyikoresha ifite database user ifite uburenganzira buke; frontend ntirahuzwa na API. SEP-53 signature yemeza urufunguzo rwasinye, ariko si uburenganzira bwose bwa Stellar multisig account cyangwa payment proof.
+PostgreSQL ya `ihuza_web3_testnet` ibika identity metadata na challenges. API iyikoresha ifite database user ifite uburenganzira buke; Vite dev proxy ihuza frontend na API kuri localhost. Ubutumwa businywa burimo origin ya local development, purpose, network, address, nonce n'igihe; frontend igenzura ibyo na signer mbere yo kohereza proof. SEP-53 signature yemeza urufunguzo rwasinye, ariko si uburenganzira bwose bwa Stellar multisig account cyangwa payment proof.
 
 ## Aho buri kintu kizaba
 

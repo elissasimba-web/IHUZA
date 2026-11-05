@@ -59,12 +59,18 @@ const first = await post('/wallet/challenges', { address });
 assert.equal(first.status, 200, JSON.stringify(first.body));
 assert.equal(first.body.address, address);
 assert.ok(first.body.message.includes(`address: ${address}`));
+assert.ok(first.body.message.includes('version: 2\norigin: http://127.0.0.1:5173\npurpose: wallet ownership only; no payment'));
 
 const badProof = await post('/wallet/proofs', {
   challenge_id: first.body.challenge_id,
   signature_base64: 'bad',
 });
 assert.equal(badProof.status, 401);
+const wrongOriginSignature = signature(first.body.message.replace('origin: http://127.0.0.1:5173', 'origin: https://wrong.example'), privateKey);
+assert.equal((await post('/wallet/proofs', {
+  challenge_id: first.body.challenge_id,
+  signature_base64: wrongOriginSignature,
+})).status, 401);
 
 const signed = signature(first.body.message, privateKey);
 const accepted = await post('/wallet/proofs', {
