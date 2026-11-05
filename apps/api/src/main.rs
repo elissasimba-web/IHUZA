@@ -339,6 +339,21 @@ async fn read_session(
     ))
 }
 
+async fn session_account_id(
+    pool: &PgPool,
+    headers: &HeaderMap,
+) -> Result<String, (StatusCode, Json<ErrorBody>)> {
+    let hash = session_hash(headers)?;
+    sqlx::query_scalar(
+        "SELECT account_id::text FROM account_sessions WHERE token_hash = $1 AND revoked_at IS NULL AND expires_at > now()",
+    )
+    .bind(hash.as_slice())
+    .fetch_optional(pool)
+    .await
+    .map_err(internal_error)?
+    .ok_or_else(|| error(StatusCode::UNAUTHORIZED, "Session ntiyemewe."))
+}
+
 async fn logout(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -412,6 +427,98 @@ async fn resolve_qr(
     ))
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MerchantApplicationRequest {
+    proposed_name: String,
+}
+
+#[derive(Serialize)]
+struct MerchantApplicationResponse {
+    proposed_name: String,
+    status: &'static str,
+}
+
+fn valid_merchant_name(name: &str) -> bool {
+    let length = name.chars().count();
+    (2..=80).contains(&length) && name.trim() == name && !name.chars().any(char::is_control)
+}
+
+async fn get_merchant_application(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<(HeaderMap, Json<MerchantApplicationResponse>), (StatusCode, Json<ErrorBody>)> {
+    let account_id = session_account_id(&state.pool, &headers).await?;
+    let proposed_name: String = sqlx::query_scalar(
+        "SELECT proposed_name FROM merchant_applications WHERE account_id = $1::uuid",
+    )
+    .bind(&account_id)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(internal_error)?
+    .ok_or_else(|| error(StatusCode::NOT_FOUND, "Ubusabe ntibuboneka."))?;
+    let mut response_headers = HeaderMap::new();
+    response_headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    Ok((
+        response_headers,
+        Json(MerchantApplicationResponse {
+            proposed_name,
+            status: "pending",
+        }),
+    ))
+}
+
+async fn submit_merchant_application(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(input): Json<MerchantApplicationRequest>,
+) -> Result<(StatusCode, HeaderMap, Json<MerchantApplicationResponse>), (StatusCode, Json<ErrorBody>)>
+{
+    require_origin(&headers)?;
+    if !valid_merchant_name(&input.proposed_name) {
+        return Err(error(
+            StatusCode::BAD_REQUEST,
+            "Izina ry'ubucuruzi ntiryemewe.",
+        ));
+    }
+    let account_id = session_account_id(&state.pool, &headers).await?;
+    let inserted: Option<String> = sqlx::query_scalar(
+        "INSERT INTO merchant_applications (account_id, proposed_name) VALUES ($1::uuid, $2) ON CONFLICT (account_id) DO NOTHING RETURNING proposed_name",
+    )
+    .bind(&account_id)
+    .bind(&input.proposed_name)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(internal_error)?;
+    let (status, proposed_name) = if let Some(name) = inserted {
+        (StatusCode::CREATED, name)
+    } else {
+        let existing: String = sqlx::query_scalar(
+            "SELECT proposed_name FROM merchant_applications WHERE account_id = $1::uuid",
+        )
+        .bind(&account_id)
+        .fetch_one(&state.pool)
+        .await
+        .map_err(internal_error)?;
+        if existing != input.proposed_name {
+            return Err(error(StatusCode::CONFLICT, "Ubusabe busanzwe buriho."));
+        }
+        (StatusCode::OK, existing)
+    };
+    Ok((
+        status,
+        {
+            let mut headers = HeaderMap::new();
+            headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+            headers
+        },
+        Json(MerchantApplicationResponse {
+            proposed_name,
+            status: "pending",
+        }),
+    ))
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenvy::dotenv().ok();
@@ -432,6 +539,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/session", get(read_session))
         .route("/api/session/logout", post(logout))
         .route("/api/qr/{reference}", get(resolve_qr))
+        .route(
+            "/api/merchant-application",
+            get(get_merchant_application).post(submit_merchant_application),
+        )
         .layer(DefaultBodyLimit::max(4096))
         .with_state(AppState { pool });
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000").await?;
@@ -441,11 +552,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg(test)]
 mod tests {
-    use super::qr_flow;
+    use super::{qr_flow, valid_merchant_name};
 
     #[test]
     fn merchant_qr_never_opens_checkout_without_approval() {
         assert_eq!(qr_flow("person"), "person_transfer_preview");
         assert_eq!(qr_flow("merchant"), "unavailable");
+    }
+
+    #[test]
+    fn merchant_name_rejects_controls_and_padding() {
+        assert!(valid_merchant_name("Iduka Ryawe"));
+        assert!(!valid_merchant_name(" A "));
+        assert!(!valid_merchant_name("A\nB"));
+        assert!(!valid_merchant_name("A"));
     }
 }

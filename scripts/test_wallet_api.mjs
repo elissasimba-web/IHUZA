@@ -100,6 +100,34 @@ assert.equal(session.headers.get('cache-control'), 'no-store');
 const sessionBody = await session.json();
 assert.equal(sessionBody.account_id, accepted.body.account_id);
 assert.equal(sessionBody.stellar_address, address);
+const merchantUrl = `${api}/merchant-application`;
+assert.equal((await fetch(merchantUrl)).status, 401);
+const merchantHeaders = { cookie, origin: 'http://127.0.0.1:5173', 'content-type': 'application/json' };
+const merchantRequest = { method: 'POST', headers: merchantHeaders, body: JSON.stringify({ proposed_name: 'Iduka Ryawe' }) };
+assert.equal((await fetch(merchantUrl, { ...merchantRequest, headers: { ...merchantHeaders, origin: 'https://wrong.example' } })).status, 403);
+assert.equal((await fetch(merchantUrl, { ...merchantRequest, body: JSON.stringify({ proposed_name: ' A ' }) })).status, 400);
+assert.equal((await fetch(merchantUrl, { ...merchantRequest, body: JSON.stringify({ proposed_name: 'Iduka Ryawe', account_id: '00000000-0000-0000-0000-000000000000' }) })).status, 422);
+const merchantCreated = await fetch(merchantUrl, merchantRequest);
+assert.equal(merchantCreated.status, 201);
+assert.equal(merchantCreated.headers.get('cache-control'), 'no-store');
+assert.deepEqual(await merchantCreated.json(), { proposed_name: 'Iduka Ryawe', status: 'pending' });
+assert.equal((await fetch(merchantUrl, merchantRequest)).status, 200);
+assert.equal((await fetch(merchantUrl, { ...merchantRequest, body: JSON.stringify({ proposed_name: 'Irindi Duka' }) })).status, 409);
+const ownApplication = await fetch(merchantUrl, { headers: { cookie } });
+assert.equal(ownApplication.status, 200);
+assert.equal(ownApplication.headers.get('cache-control'), 'no-store');
+assert.deepEqual(await ownApplication.json(), { proposed_name: 'Iduka Ryawe', status: 'pending' });
+const stillPerson = await fetch(`${api}/qr/${accepted.body.qr_reference}`);
+assert.deepEqual(await stillPerson.json(), { account_kind: 'person', flow: 'person_transfer_preview' });
+const otherKeys = generateKeyPairSync('ed25519');
+const otherChallenge = await post('/wallet/challenges', { address: stellarAddress(otherKeys.publicKey) });
+assert.equal(otherChallenge.status, 200);
+const otherProof = await post('/wallet/proofs', {
+  challenge_id: otherChallenge.body.challenge_id,
+  signature_base64: signature(otherChallenge.body.message, otherKeys.privateKey),
+});
+assert.equal(otherProof.status, 200);
+assert.equal((await fetch(merchantUrl, { headers: { cookie: otherProof.cookie.split(';')[0] } })).status, 404);
 const foreignLogout = await fetch(`${api}/session/logout`, { method: 'POST', headers: { cookie, origin: 'https://wrong.example' } });
 assert.equal(foreignLogout.status, 403);
 const logout = await fetch(`${api}/session/logout`, { method: 'POST', headers: { cookie, origin: 'http://127.0.0.1:5173' } });
@@ -133,4 +161,4 @@ const concurrent = await Promise.all([
 ]);
 assert.deepEqual(concurrent.map((result) => result.status).sort(), [200, 409]);
 
-console.log('Wallet API integration check passed: issue, reject, accept, QR resolution, session, logout, replay, concurrent replay.');
+console.log('Wallet API integration check passed: identity, QR resolution, isolated pending merchant request, session, logout and replay guards.');

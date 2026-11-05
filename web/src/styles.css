@@ -419,6 +419,30 @@ a {
   line-height:1.5;
   margin:12px 0 0
 }
+.merchant-application-panel {
+  margin:20px 0;
+  padding:17px;
+  border:1px solid #ffffff24;
+  border-radius:10px
+}
+.merchant-application-panel h5 {
+  margin:0;
+  font-size:15px
+}
+.merchant-application-panel p {
+  margin:9px 0 12px;
+  color:#a9c6c7;
+  font-size:12px;
+  line-height:1.5
+}
+.merchant-application-panel form[hidden] {
+  display:none
+}
+.merchant-application-panel label {
+  display:block;
+  margin-bottom:8px;
+  font-size:12px
+}
 .scan-section {
   background:#0a222d
 }

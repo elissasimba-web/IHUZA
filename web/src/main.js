@@ -2,10 +2,12 @@ import { getAddress, getNetworkDetails, isAllowed, isConnected, requestAccess, s
 import { createWalletService } from './wallet.js';
 import { createOwnershipService } from './ownership.js';
 import { renderAccountQr, resolveAccountQr } from './account_qr.js';
+import { createMerchantApplicationService } from './merchant_application.js';
 import './styles.css';
 
 const service = createWalletService({ getAddress, getNetworkDetails, isAllowed, isConnected, requestAccess, signMessage });
 const ownership = createOwnershipService(service);
+const merchantApplication = createMerchantApplicationService();
 const badge = document.querySelector('#status-badge');
 const message = document.querySelector('#wallet-message');
 const details = document.querySelector('#wallet-details');
@@ -26,6 +28,9 @@ const accountQr = document.querySelector('#account-qr');
 const scanForm = document.querySelector('#scan-form');
 const scanReference = document.querySelector('#scan-reference');
 const scanResult = document.querySelector('#scan-result');
+const merchantApplicationForm = document.querySelector('#merchant-application-form');
+const merchantApplicationStatus = document.querySelector('#merchant-application-status');
+const merchantName = document.querySelector('#merchant-name');
 
 const messages = {
   missing: ['Freighter ntiboneka', 'Shyira Freighter extension muri browser, hanyuma wongere ugenzure.'],
@@ -47,7 +52,25 @@ function clearOwnership() {
   ownershipResult.hidden = true;
   accountReference.textContent = '';
   accountQr.hidden = true;
+  merchantApplicationForm.hidden = true;
+  merchantApplicationStatus.textContent = '';
   ownershipMessage.textContent = '';
+}
+
+async function refreshMerchantApplication() {
+  merchantApplicationForm.hidden = true;
+  merchantApplicationStatus.textContent = 'Turagenzura ubusabe bw’umucuruzi...';
+  try {
+    const application = await merchantApplication.current();
+    if (application) {
+      merchantApplicationStatus.textContent = `Ubusabe bwa “${application.proposed_name}” buracyasuzumwa. QR yawe iracyari iya konti isanzwe.`;
+    } else {
+      merchantApplicationForm.hidden = false;
+      merchantApplicationStatus.textContent = '';
+    }
+  } catch {
+    merchantApplicationStatus.textContent = 'Ntitwabashije kugenzura ubusabe. Ongera ugerageze.';
+  }
 }
 
 async function showAccountQr(reference) {
@@ -90,10 +113,13 @@ async function restoreSession() {
     ownershipResult.hidden = true;
     accountReference.textContent = '';
     accountQr.hidden = true;
+    merchantApplicationForm.hidden = true;
+    merchantApplicationStatus.textContent = '';
     return;
   }
   ownershipMessage.textContent = 'Session ya testnet irakora.';
   await showAccountQr(session.qr_reference);
+  await refreshMerchantApplication();
 }
 
 async function check(method) {
@@ -153,6 +179,7 @@ async function signOwnership() {
       challengePreview.hidden = true;
       ownershipMessage.textContent = 'Umukono wagenzuwe na IHUZA+ API.';
       await showAccountQr(result.qr_reference);
+      await refreshMerchantApplication();
     } else {
       clearOwnership();
       ownershipMessage.textContent = result.message;
@@ -197,6 +224,24 @@ scanForm.addEventListener('submit', async (event) => {
     scanResult.textContent = 'Ntitwabashije kugenzura reference. Ongera ugerageze.';
   } finally {
     button.disabled = false;
+  }
+});
+merchantApplicationForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (busy) return;
+  busy = true;
+  const button = merchantApplicationForm.querySelector('button');
+  button.disabled = true;
+  merchantApplicationStatus.textContent = 'Turabika ubusabe bwawe...';
+  try {
+    const application = await merchantApplication.submit(merchantName.value.trim());
+    merchantApplicationForm.hidden = true;
+    merchantApplicationStatus.textContent = `Ubusabe bwa “${application.proposed_name}” bwakiriwe. Buracyasuzumwa; checkout ntirafungurwa.`;
+  } catch {
+    merchantApplicationStatus.textContent = 'Ubusabe ntibwakiriwe. Reba izina wanditse cyangwa ubusabe busanzwe buriho.';
+  } finally {
+    button.disabled = false;
+    busy = false;
   }
 });
 window.addEventListener('focus', () => { if (!busy) check('inspect'); });

@@ -9,6 +9,13 @@ Iyi ni gahunda yo kubaka API na database ya Web3 testnet. `db/web3_testnet/001_i
 - Nyuma ya proof yemejwe, kora session muri transaction imwe n'account/challenge/audit. `GET /api/session` isoma cookie, igenzura hash, expiry na revocation; `POST /api/session/logout` ifunga session ikanahanagura cookie. POST requests zigenzura exact local Origin. Session ntisimbura umukono wa wallet ku mafaranga.
 - Mbere yo gukoresha migration: genzura SQL, ingaruka ku role, ko database ari `ihuza_web3_testnet`, n'uko API tests zikora. Nyuma yo kuyikoresha: genzura migration info, proof→session→logout→replay, ndetse ko database ibika hash y'uburebure bwa bytes 32 gusa. Nta migration yasibwe cyangwa yongeye kwandikwa.
 
+## Gahunda ya `003_merchant_applications.sql`
+
+- Ubusabe bwo kuba umucuruzi bubikwa off-chain muri `merchant_applications`: `account_id` imwe, izina umusaba yatanze, igihe yabisabiye. Ubusabe ni `pending` gusa; ntabwo buhindura `accounts.account_kind`, QR cyangwa uburenganzira bwo kwakira checkout. Izina ntiryemejwe n'ubusabe bwonyine.
+- Gukora no gusoma ubusabe bisaba session ya konti nyirayo. API ikura `account_id` muri session yagenzuwe, si mu byo umukoresha yohereje. Ubusabe bumwe kuri konti; gusubiramo izina rimwe ntibyongera record, guhindura izina bisaba inzira izasuzumwa nyuma. Runtime role ihabwa `SELECT` na `INSERT` gusa; nta `UPDATE` cyangwa `DELETE`.
+- Nta reviewer/admin endpoint iri muri iki gice. Uko merchant yemezwa, ibimenyetso bisabwa n'uburenganzira bwa reviewer bizasobanurwa mbere yo kwandika approval migration cyangwa guhindura `account_kind`. Wallet ya customer ikomeza kugenzurwa na nyirayo.
+- Migration igira guard ya `ihuza_web3_testnet`; ntihindura migrations zashyizweho. Mbere yo kuyikoresha, suzuma SQL n'uburenganzira. Nyuma yayo, gerageza session yemewe/itarimo, duplicate, isolation hagati ya konti ebyiri, kandi wemeze ko QR ikomeza kugaragaza `person_transfer_preview`.
+
 ## Ahazubakwa
 
 - Database yihariye `ihuza_web3_testnet` ifite connection string yayo. Mainnet izakenera database n'amabwiriza byayo ukwabyo.
