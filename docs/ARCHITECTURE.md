@@ -2,7 +2,7 @@
 
 ## Aho tugeze
 
-Iri shami rifite Soroban `intent_anchor` contract, read-only testnet probe, frontend ihuza Freighter wallet kuri testnet ikerekana public address, na Rust library igenzura SEP-53 wallet signature. Nta API, database schema nshya, wallet-to-account binding, QR resolver, chain indexer, payment cyangwa Receipt Vault birimo. Mu iyimurika bigomba kuvugwa uko biri.
+Iri shami rifite Soroban `intent_anchor` contract, read-only testnet probe, frontend ihuza Freighter wallet kuri testnet ikerekana public address, Rust library igenzura SEP-53 wallet signature, na SQL migration yanditswe ariko itarakoreshwa. Nta API, database nshya ikora, wallet-to-account binding, QR resolver, chain indexer, payment cyangwa Receipt Vault birimo. Mu iyimurika bigomba kuvugwa uko biri.
 
 Iyi prototype ntikoresha PostgreSQL kugeza ubu. Hazakenerwa database nshya y'amakuru ya off-chain, yubatse ku bisabwa n'iyi architecture; ntituzafata records za database ya kera nk'aho ari amafaranga ya Stellar.
 
