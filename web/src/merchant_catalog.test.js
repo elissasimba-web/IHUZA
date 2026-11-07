@@ -39,3 +39,20 @@ test('quote preview accepts only server-calculated lines and total', async () =>
   preview.total = '1.00';
   await assert.rejects(() => service.preview(reference, items));
 });
+
+test('invoice draft keeps exact selection and rejects forged total', async () => {
+  const productId = '11111111-1111-4111-8111-111111111111';
+  const items = [{ product_id: productId, quantity: 2 }];
+  const draft = { id: '22222222-2222-4222-8222-222222222222', status: 'draft', merchant_reference: reference,
+    merchant_name: 'Iduka', currency_code: 'RWF', total: '2001.00',
+    lines: [{ product_id: productId, name: 'Umuceri', quantity: 2, unit_price: '1000.50', line_total: '2001.00' }] };
+  const service = createMerchantCatalogService(async (url, options) => {
+    assert.equal(url, '/api/invoice-drafts');
+    assert.equal(options.credentials, 'same-origin');
+    assert.deepEqual(JSON.parse(options.body), { merchant_reference: reference, items, idempotency_key: 'a'.repeat(64) });
+    return { status: 201, json: async () => draft };
+  });
+  assert.deepEqual(await service.createDraft(reference, items, 'a'.repeat(64)), draft);
+  draft.total = '1.00';
+  await assert.rejects(() => service.createDraft(reference, items, 'a'.repeat(64)));
+});

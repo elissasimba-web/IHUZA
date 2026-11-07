@@ -2,7 +2,7 @@
 
 Ubusabe bw'umucuruzi wa testnet ubu busaba izina ry'uwasabye, iry'ubucuruzi n'irya company iyo rihari. Reviewers 2 muri 3 basinyira iyo profile yose. Votes za kera zasinyiraga izina ry'ubucuruzi gusa ntizongera gufungura merchant; si KYC, EBM cyangwa uburenganzira bwo gukora delivery.
 
-Umukiriya winjiye ashobora guhitamo ibicuruzwa muri catalog ya merchant wemewe, API ikabara **total y'agateganyo** ku biciro biri muri database. Nta invoice ibikwa, nta checkout cyangwa ubwishyu bukorwa; Smart Invoice iracyasaba migration ya snapshots n'idempotency.
+Umukiriya winjiye ashobora guhitamo ibicuruzwa muri catalog ya merchant wemewe, API ikabara total ku biciro biri muri database, ikanabika **Smart Invoice draft** ifite snapshots n'idempotency. Draft iguma itishyuwe; nta checkout, EBM cyangwa ubwishyu bukorwa.
 
 **One Account. Every Service.**
 
@@ -15,8 +15,8 @@ IHUZA+ ni umushinga wa serivisi z'imari n'iz'ubucuruzi ugenewe u Rwanda. Ubu iyi
 - `scripts/check_stellar_testnet.ps1` ni read-only network probe; ntabwo ari payment integration.
 - `web/` ihuza Freighter kuri Stellar testnet, ikerekana challenge n'ubutumwa businywa mbere ya popup, ikagenzura network, origin, aderesi na signer, hanyuma ikohereza signature kuri API. Ishushanya QR imwe y'account reference muri browser kandi ishobora kugenzura reference yanditswe n'umukoresha. Nta transaction ikora.
 - `crates/wallet_proof` itanga nonce ya 256-bit ivuye muri OS RNG, ikanagenzura umukono wa SEP-53 kuri challenge ya Stellar testnet n'igihe imara.
-- PostgreSQL database `ihuza_web3_testnet` iri muri container `ihuza-web3-postgres`; migrations `001_identity.sql` kugeza kuri `006_merchant_profile_versions.sql` zashyizweho na `sqlx`. Irimo identity, sessions, merchant profiles, review votes na catalog y'igerageza, nta wallet funds cyangwa payment records. Reba [gahunda ya database](docs/WEB3_DATA_PLAN.md).
-- `apps/api` ifite endpoints za localhost za wallet proof, session, QR resolver, merchant application, review ya 2-of-3 na catalog. Reviewer addresses eshatu zigomba gushyirwa muri `IHUZA_REVIEWER_ADDRESSES`; iyo config ibuze, approval na catalog birafungwa. `GET /api/reviewer-status` ifasha web kwerekana review panel kuri reviewer ufite session gusa; API ikomeza kugenzura uburenganzira kuri buri vote. Merchant wemejwe ashobora kwandika ibicuruzwa n'ibiciro byanditswe nka RWF yo kwerekana gusa; usoma QR ye abona catalog. Nta guhindura ibiciro, checkout, invoice cyangwa payment irimo. Igeragezwa rya end-to-end ryatsinze n'imfunguzo z'igerageza zo muri memory; Freighter nyayo ntirageragezwa muri browser ifite extension.
+- PostgreSQL database `ihuza_web3_testnet` iri muri container `ihuza-web3-postgres`; migrations `001_identity.sql` kugeza kuri `007_smart_invoice_drafts.sql` zashyizweho na `sqlx`. Irimo identity, sessions, merchant profiles, review votes, catalog na invoice drafts z'igerageza, nta wallet funds cyangwa payment records. Reba [gahunda ya database](docs/WEB3_DATA_PLAN.md).
+- `apps/api` ifite endpoints za localhost za wallet proof, session, QR resolver, merchant application, review ya 2-of-3 na catalog. Reviewer addresses eshatu zigomba gushyirwa muri `IHUZA_REVIEWER_ADDRESSES`; iyo config ibuze, approval na catalog birafungwa. `GET /api/reviewer-status` ifasha web kwerekana review panel kuri reviewer ufite session gusa; API ikomeza kugenzura uburenganzira kuri buri vote. Merchant wemejwe ashobora kwandika ibicuruzwa n'ibiciro byanditswe nka RWF yo kwerekana gusa; usoma QR ye abona catalog. Nta guhindura ibiciro, checkout cyangwa payment irimo; invoice drafts si ubwishyu. Igeragezwa rya end-to-end ryatsinze n'imfunguzo z'igerageza zo muri memory; Freighter nyayo ntirageragezwa muri browser ifite extension.
 
 ## Ibyo project izubaka
 

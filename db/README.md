@@ -1,8 +1,8 @@
 # Web3 testnet database
 
-`006` ibika profile version n'ibisuzuma bishya. Votes za `004` ziguma mu mateka kandi ntizikiri mu mibare y'approval. Nta TIN, KYC, EBM cyangwa payment yabitswe muri iyi migration.
+`006` ibika profile version n'ibisuzuma bishya. `007` ibika Smart Invoice drafts zifite snapshots n'idempotency. Votes za `004` ziguma mu mateka kandi ntizikiri mu mibare y'approval. Nta TIN, KYC, EBM cyangwa payment yabitswe muri izi migrations.
 
-Migrations `001_identity.sql` kugeza kuri `006_merchant_profile_versions.sql` zashyizwe kuri PostgreSQL 17 database `ihuza_web3_testnet` iri muri container `ihuza-web3-postgres` ikoresha volume yihariye `ihuza-web3-testnet-pgdata`. `./scripts/web3_migrate.ps1` yemeza uko zashyizweho. Port ifunguye kuri `127.0.0.1:5432` gusa.
+Migrations `001_identity.sql` kugeza kuri `007_smart_invoice_drafts.sql` zashyizwe kuri PostgreSQL 17 database `ihuza_web3_testnet` iri muri container `ihuza-web3-postgres` ikoresha volume yihariye `ihuza-web3-testnet-pgdata`. `./scripts/web3_migrate.ps1` yemeza uko zashyizweho. Port ifunguye kuri `127.0.0.1:5432` gusa.
 
 API connection ibikwa muri `.env`, migration owner connection ikabikwa muri `.env.migration`; Git yirengagiza zombi. Ntushyire password muri Git cyangwa mu nyandiko. Kugenzura migration: `./scripts/web3_migrate.ps1`; gukoresha migration nshya: `./scripts/web3_migrate.ps1 -Apply`. Iyi script ikoresha `MIGRATION_DATABASE_URL` ya owner, ikagenzura izina rya database. Mbere yo kongera migrations, banza utegure backup/restore. Nta migration yashyizweho inshuro ebyiri.
 

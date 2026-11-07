@@ -1099,14 +1099,14 @@ async fn list_products(
     Ok((response_headers, Json(products)))
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct QuoteItemRequest {
     product_id: String,
     quantity: u32,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct QuotePreviewRequest {
     merchant_reference: String,
@@ -1202,6 +1202,143 @@ async fn preview_quote(
     ))
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CreateInvoiceRequest {
+    merchant_reference: String,
+    items: Vec<QuoteItemRequest>,
+    idempotency_key: String,
+}
+
+#[derive(Serialize)]
+struct InvoiceDraftResponse {
+    id: String,
+    status: &'static str,
+    merchant_name: String,
+    merchant_reference: String,
+    currency_code: &'static str,
+    lines: Vec<QuoteLine>,
+    total: String,
+}
+
+async fn read_invoice_for_customer(
+    state: &AppState,
+    invoice_id: &str,
+    customer_id: &str,
+) -> Result<InvoiceDraftResponse, (StatusCode, Json<ErrorBody>)> {
+    let row = sqlx::query("SELECT id::text AS id, merchant_name, merchant_reference, total::text AS total FROM smart_invoice_drafts WHERE id = $1::uuid AND customer_account_id = $2::uuid")
+        .bind(invoice_id).bind(customer_id).fetch_optional(&state.pool).await.map_err(internal_error)?
+        .ok_or_else(|| error(StatusCode::NOT_FOUND, "Invoice ntiboneka."))?;
+    let lines = sqlx::query("SELECT product_id::text AS product_id, product_name AS name, quantity, unit_price::text AS unit_price, line_total::text AS line_total FROM smart_invoice_lines WHERE invoice_id = $1::uuid ORDER BY line_number")
+        .bind(invoice_id).fetch_all(&state.pool).await.map_err(internal_error)?
+        .into_iter().map(|line| Ok(QuoteLine {
+            product_id: line.try_get("product_id").map_err(internal_error)?,
+            name: line.try_get("name").map_err(internal_error)?,
+            quantity: line.try_get::<i32, _>("quantity").map_err(internal_error)? as u32,
+            unit_price: line.try_get("unit_price").map_err(internal_error)?,
+            line_total: line.try_get("line_total").map_err(internal_error)?,
+        })).collect::<Result<Vec<_>, (StatusCode, Json<ErrorBody>)>>()?;
+    Ok(InvoiceDraftResponse {
+        id: row.try_get("id").map_err(internal_error)?,
+        status: "draft",
+        merchant_name: row.try_get("merchant_name").map_err(internal_error)?,
+        merchant_reference: row.try_get("merchant_reference").map_err(internal_error)?,
+        currency_code: "RWF",
+        total: row.try_get("total").map_err(internal_error)?,
+        lines,
+    })
+}
+
+async fn create_invoice_draft(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(input): Json<CreateInvoiceRequest>,
+) -> Result<(StatusCode, HeaderMap, Json<InvoiceDraftResponse>), (StatusCode, Json<ErrorBody>)> {
+    require_origin(&headers)?;
+    let customer_id = session_account_id(&state.pool, &headers).await?;
+    if input.idempotency_key.len() != 64
+        || !input
+            .idempotency_key
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    {
+        return Err(error(StatusCode::BAD_REQUEST, "Idempotency key ntiyemewe."));
+    }
+    let mut request_text = input.merchant_reference.clone();
+    for item in &input.items {
+        request_text.push_str(&format!("\n{}:{}", item.product_id, item.quantity));
+    }
+    let request_hash = sha256_hex(&request_text);
+    if let Some(existing) = sqlx::query("SELECT id::text AS id, request_hash FROM smart_invoice_drafts WHERE customer_account_id = $1::uuid AND idempotency_key = $2")
+        .bind(&customer_id).bind(&input.idempotency_key).fetch_optional(&state.pool).await.map_err(internal_error)? {
+        let old_hash: String = existing.try_get("request_hash").map_err(internal_error)?;
+        if old_hash != request_hash { return Err(error(StatusCode::CONFLICT, "Idempotency key yakoreshejwe ku rundi rutonde.")); }
+        let id: String = existing.try_get("id").map_err(internal_error)?;
+        let draft = read_invoice_for_customer(&state, &id, &customer_id).await?;
+        let mut response_headers = HeaderMap::new();
+        response_headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+        return Ok((StatusCode::OK, response_headers, Json(draft)));
+    }
+    let (_, Json(quote)) = preview_quote(
+        State(state.clone()),
+        headers,
+        Json(QuotePreviewRequest {
+            merchant_reference: input.merchant_reference.clone(),
+            items: input.items,
+        }),
+    )
+    .await?;
+    let merchant = sqlx::query("SELECT a.id::text AS merchant_id, m.proposed_name FROM accounts a JOIN merchant_applications m ON m.account_id = a.id WHERE a.qr_reference = $1")
+        .bind(&input.merchant_reference).fetch_one(&state.pool).await.map_err(internal_error)?;
+    let merchant_id: String = merchant.try_get("merchant_id").map_err(internal_error)?;
+    let merchant_name: String = merchant.try_get("proposed_name").map_err(internal_error)?;
+    let mut tx = state.pool.begin().await.map_err(internal_error)?;
+    let inserted: Option<String> = sqlx::query_scalar("INSERT INTO smart_invoice_drafts (customer_account_id, merchant_account_id, merchant_name, merchant_reference, idempotency_key, request_hash, total) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7::numeric) ON CONFLICT (customer_account_id, idempotency_key) DO NOTHING RETURNING id::text")
+        .bind(&customer_id).bind(&merchant_id).bind(&merchant_name).bind(&input.merchant_reference)
+        .bind(&input.idempotency_key).bind(&request_hash).bind(&quote.total)
+        .fetch_optional(&mut *tx).await.map_err(internal_error)?;
+    let (invoice_id, status) = if let Some(id) = inserted {
+        for (index, line) in quote.lines.iter().enumerate() {
+            sqlx::query("INSERT INTO smart_invoice_lines (invoice_id, line_number, product_id, product_name, quantity, unit_price, line_total) VALUES ($1::uuid, $2, $3::uuid, $4, $5, $6::numeric, $7::numeric)")
+                .bind(&id).bind((index + 1) as i32).bind(&line.product_id).bind(&line.name)
+                .bind(line.quantity as i32).bind(&line.unit_price).bind(&line.line_total)
+                .execute(&mut *tx).await.map_err(internal_error)?;
+        }
+        (id, StatusCode::CREATED)
+    } else {
+        let row = sqlx::query("SELECT id::text AS id, request_hash FROM smart_invoice_drafts WHERE customer_account_id = $1::uuid AND idempotency_key = $2")
+            .bind(&customer_id).bind(&input.idempotency_key).fetch_one(&mut *tx).await.map_err(internal_error)?;
+        let old_hash: String = row.try_get("request_hash").map_err(internal_error)?;
+        if old_hash != request_hash {
+            return Err(error(
+                StatusCode::CONFLICT,
+                "Idempotency key yakoreshejwe ku rundi rutonde.",
+            ));
+        }
+        (row.try_get("id").map_err(internal_error)?, StatusCode::OK)
+    };
+    tx.commit().await.map_err(internal_error)?;
+    let draft = read_invoice_for_customer(&state, &invoice_id, &customer_id).await?;
+    let mut response_headers = HeaderMap::new();
+    response_headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    Ok((status, response_headers, Json(draft)))
+}
+
+async fn get_invoice_draft(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<(HeaderMap, Json<InvoiceDraftResponse>), (StatusCode, Json<ErrorBody>)> {
+    if !valid_uuid(&id) {
+        return Err(error(StatusCode::BAD_REQUEST, "Invoice ID ntiyemewe."));
+    }
+    let customer_id = session_account_id(&state.pool, &headers).await?;
+    let draft = read_invoice_for_customer(&state, &id, &customer_id).await?;
+    let mut response_headers = HeaderMap::new();
+    response_headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    Ok((response_headers, Json(draft)))
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenvy::dotenv().ok();
@@ -1239,6 +1376,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/merchant-products", post(create_product))
         .route("/api/merchant-products/{reference}", get(list_products))
         .route("/api/quote-preview", post(preview_quote))
+        .route("/api/invoice-drafts", post(create_invoice_draft))
+        .route("/api/invoice-drafts/{id}", get(get_invoice_draft))
         .layer(DefaultBodyLimit::max(4096))
         .with_state(AppState { pool, reviewers });
     let bind = std::env::var("IHUZA_API_BIND").unwrap_or_else(|_| "127.0.0.1:3000".to_owned());

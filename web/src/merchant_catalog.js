@@ -68,5 +68,30 @@ export function createMerchantCatalogService(fetchImpl = fetch) {
       if (minorUnits(preview.total) !== calculated) throw new Error('invalid quote total');
       return preview;
     },
+    async createDraft(reference, items, idempotencyKey) {
+      if (!referencePattern.test(reference) || !Array.isArray(items) || items.length < 1 || items.length > 20 ||
+          !/^[0-9a-f]{64}$/.test(idempotencyKey)) throw new Error('invalid invoice request');
+      const response = await fetchImpl('/api/invoice-drafts', {
+        method: 'POST', credentials: 'same-origin', cache: 'no-store',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ merchant_reference: reference, items, idempotency_key: idempotencyKey }),
+      });
+      if (![200, 201].includes(response.status)) throw new Error('invoice draft unavailable');
+      const draft = await response.json();
+      if (draft?.status !== 'draft' || draft.merchant_reference !== reference || draft.currency_code !== 'RWF' ||
+          typeof draft.id !== 'string' || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(draft.id) ||
+          !Array.isArray(draft.lines) || draft.lines.length !== items.length || minorUnits(draft.total) === null) throw new Error('invalid invoice draft');
+      let total = 0n;
+      for (let i = 0; i < items.length; i++) {
+        const line = draft.lines[i];
+        const unit = minorUnits(line?.unit_price);
+        const lineTotal = minorUnits(line?.line_total);
+        if (line?.product_id !== items[i].product_id || line?.quantity !== items[i].quantity ||
+            typeof line.name !== 'string' || unit === null || lineTotal !== unit * BigInt(line.quantity)) throw new Error('invalid invoice line');
+        total += lineTotal;
+      }
+      if (minorUnits(draft.total) !== total) throw new Error('invalid invoice total');
+      return draft;
+    },
   };
 }

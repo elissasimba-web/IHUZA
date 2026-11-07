@@ -175,6 +175,21 @@ try {
   assert.equal(preview.currency_code, 'RWF');
   assert.equal(preview.total, '3001.52');
   assert.deepEqual(preview.lines.map((line) => line.line_total), ['3001.50', '0.02']);
+  const invoiceBody = { ...quoteBody, idempotency_key: 'a'.repeat(64) };
+  assert.equal((await request(3001, '/invoice-drafts', { method: 'POST', body: invoiceBody })).status, 401);
+  const createdDraftResponse = await request(3001, '/invoice-drafts', { method: 'POST', cookie: outsiderSession.cookie, body: invoiceBody });
+  assert.equal(createdDraftResponse.status, 201);
+  const draft = await createdDraftResponse.json();
+  assert.equal(draft.status, 'draft');
+  assert.equal(draft.total, '3001.52');
+  assert.deepEqual(draft.lines.map((line) => line.line_total), ['3001.50', '0.02']);
+  const repeatedDraftResponse = await request(3001, '/invoice-drafts', { method: 'POST', cookie: outsiderSession.cookie, body: invoiceBody });
+  assert.equal(repeatedDraftResponse.status, 200);
+  assert.deepEqual(await repeatedDraftResponse.json(), draft);
+  assert.equal((await request(3001, '/invoice-drafts', { method: 'POST', cookie: outsiderSession.cookie,
+    body: { ...invoiceBody, items: [{ product_id: product.id, quantity: 1 }] } })).status, 409);
+  assert.deepEqual(await (await request(3001, `/invoice-drafts/${draft.id}`, { cookie: outsiderSession.cookie })).json(), draft);
+  assert.equal((await request(3001, `/invoice-drafts/${draft.id}`, { cookie: applicant.cookie })).status, 404);
 
   rotatedApi = startApi(3002, [reviewers[0].address, reviewers[1].address, outsider.address]);
   await waitForApi(3002, rotatedApi);
@@ -183,6 +198,7 @@ try {
     { account_kind: 'person', flow: 'person_transfer_preview' });
   assert.equal((await request(3002, `/merchant-products/${applicant.qr_reference}`)).status, 403);
   assert.equal((await request(3002, quotePath, { method: 'POST', cookie: outsiderSession.cookie, body: quoteBody })).status, 403);
+  assert.deepEqual(await (await request(3002, `/invoice-drafts/${draft.id}`, { cookie: outsiderSession.cookie })).json(), draft);
   console.log('Merchant review and catalog check passed: quorum, signer gate, replay, price validation and reviewer-set rotation.');
 } finally {
   rotatedApi?.kill();

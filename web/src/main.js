@@ -55,6 +55,8 @@ const scanProducts = document.querySelector('#scan-products');
 const quoteForm = document.querySelector('#quote-form');
 const quoteItems = document.querySelector('#quote-items');
 const quoteResult = document.querySelector('#quote-result');
+const saveDraftButton = document.querySelector('#save-draft-button');
+const draftResult = document.querySelector('#draft-result');
 
 const messages = {
   missing: ['Freighter ntiboneka', 'Shyira Freighter extension muri browser, hanyuma wongere ugenzure.'],
@@ -68,6 +70,8 @@ let activeAddress = null;
 let activeChallenge = null;
 let busy = false;
 let activeReview = null;
+let latestQuote = null;
+let draftKey = null;
 
 function clearOwnership() {
   activeChallenge = null;
@@ -76,6 +80,8 @@ function clearOwnership() {
   signButton.disabled = true;
   ownershipResult.hidden = true;
   quoteForm.hidden = true;
+  latestQuote = null;
+  saveDraftButton.hidden = true;
   accountReference.textContent = '';
   accountQr.hidden = true;
   merchantApplicationForm.hidden = true;
@@ -190,6 +196,8 @@ async function restoreSession() {
     if (!ownershipResult.hidden) ownershipMessage.textContent = 'Session yarangiye. Ongera wemeze wallet yawe.';
     ownershipResult.hidden = true;
     quoteForm.hidden = true;
+    latestQuote = null;
+    saveDraftButton.hidden = true;
     accountReference.textContent = '';
     accountQr.hidden = true;
     merchantApplicationForm.hidden = true;
@@ -303,6 +311,10 @@ scanForm.addEventListener('submit', async (event) => {
   quoteForm.hidden = true;
   quoteItems.replaceChildren();
   quoteResult.textContent = '';
+  draftResult.textContent = '';
+  latestQuote = null;
+  draftKey = null;
+  saveDraftButton.hidden = true;
   const button = scanForm.querySelector('button');
   button.disabled = true;
   try {
@@ -330,6 +342,7 @@ scanForm.addEventListener('submit', async (event) => {
           quantity.value = '0';
           quantity.dataset.productId = product.id;
           quantity.setAttribute('aria-label', `Ingano ya ${product.name}`);
+          quantity.addEventListener('input', () => { latestQuote = null; draftKey = null; saveDraftButton.hidden = true; quoteResult.textContent = ''; draftResult.textContent = ''; });
           row.append(name, quantity);
           quoteItems.append(row);
         }
@@ -344,6 +357,7 @@ scanForm.addEventListener('submit', async (event) => {
     button.disabled = false;
   }
 });
+scanReference.addEventListener('input', () => { latestQuote = null; draftKey = null; saveDraftButton.hidden = true; quoteResult.textContent = ''; draftResult.textContent = ''; });
 quoteForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   const button = quoteForm.querySelector('button');
@@ -353,11 +367,32 @@ quoteForm.addEventListener('submit', async (event) => {
     const items = [...quoteItems.querySelectorAll('input')].filter((input) => Number(input.value) > 0)
       .map((input) => ({ product_id: input.dataset.productId, quantity: Number(input.value) }));
     const preview = await merchantCatalog.preview(scanReference.value.trim(), items);
+    latestQuote = { reference: scanReference.value.trim(), items };
+    draftKey = null;
+    saveDraftButton.hidden = false;
     quoteResult.textContent = `Total y’agateganyo: ${preview.total} RWF. Nta fagitire cyangwa ubwishyu byakozwe.`;
   } catch {
+    latestQuote = null;
+    saveDraftButton.hidden = true;
     quoteResult.textContent = 'Total ntiyabonetse. Hitamo ibicuruzwa, wemeze ko winjiye muri IHUZA+ kandi ko merchant akiri wemewe.';
   } finally {
     button.disabled = false;
+  }
+});
+saveDraftButton.addEventListener('click', async () => {
+  if (!latestQuote || saveDraftButton.disabled) return;
+  saveDraftButton.disabled = true;
+  draftResult.textContent = 'Turabika invoice draft...';
+  try {
+    if (!draftKey) draftKey = [...crypto.getRandomValues(new Uint8Array(32))].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+    const draft = await merchantCatalog.createDraft(latestQuote.reference, latestQuote.items, draftKey);
+    draftResult.textContent = `Invoice draft ${draft.id} yabitswe: ${draft.total} RWF. Ntiyishyuwe; si fagitire ya EBM.`;
+    saveDraftButton.hidden = true;
+    latestQuote = null;
+  } catch {
+    draftResult.textContent = 'Invoice draft ntibashije kubikwa. Ongera ugerageze; urutonde rumwe ntirurema invoice ya kabiri.';
+  } finally {
+    saveDraftButton.disabled = false;
   }
 });
 productForm.addEventListener('submit', async (event) => {

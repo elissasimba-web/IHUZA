@@ -2,7 +2,9 @@
 
 Migration `006_merchant_profile_versions.sql` yongeraho profile versions na votes zibohwa kuri profile yose. `004` votes z'izina rimwe ziguma mu mateka gusa. Merchant usanzwe atanga amazina y'ibanze; KYC ya delivery na EBM ntibirubakwa.
 
-Iyi ni gahunda n'amateka yo kubaka API na database ya Web3 testnet. Migrations `001_identity.sql` kugeza kuri `006_merchant_profile_versions.sql` zashyizwe muri `ihuza_web3_testnet` na `sqlx`. API ya localhost itanga challenge ikanagenzura proof, ikarema cyangwa igasoma konti muri transaction, ikanatanga session. Frontend ihuza Freighter kuri iyo API. `003` ibika merchant applications, `004` ikabika votes za reviewers, `005` ikabika catalog n'ibiciro byanditswe n'umucuruzi; nta payment cyangwa wallet funds bibikwa hano.
+Migration `007_smart_invoice_drafts.sql` ibika invoice drafts n'imirongo ifite snapshots z'ibiciro; reba `docs/SMART_INVOICE_PLAN.md`. Nta payment status yemejwe cyangwa EBM invoice biyivamo.
+
+Iyi ni gahunda n'amateka yo kubaka API na database ya Web3 testnet. Migrations `001_identity.sql` kugeza kuri `007_smart_invoice_drafts.sql` zashyizwe muri `ihuza_web3_testnet` na `sqlx`. API ya localhost itanga challenge ikanagenzura proof, ikarema cyangwa igasoma konti muri transaction, ikanatanga session. Frontend ihuza Freighter kuri iyo API. `003` ibika merchant applications, `004` ikabika votes za reviewers, `005` ikabika catalog n'ibiciro byanditswe n'umucuruzi; nta payment cyangwa wallet funds bibikwa hano.
 
 ## Gahunda yasuzumwe ya `002_sessions.sql`
 
