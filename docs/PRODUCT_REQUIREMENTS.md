@@ -24,6 +24,7 @@ Iyi nyandiko ivuga imyitwarire ya product izubakwa. Ntivuga ko ibyo byose byamaz
 - Smart Invoice ibika immutable snapshots z'izina ry'ikicuruzwa, quantity, unit price, total, currency, merchant na customer aho azwi. Nta invoice QR ya kabiri.
 - Umukiriya yemera ibyo ahisemo mbere yo gusinya ubwishyu. Merchant ntasabwa kubanza kwemeza urutonde kugira ngo transaction ikorwe.
 - Payment success ishingira ku gisubizo cya Stellar cyagenzuwe byigenga; hash yoherejwe cyangwa notification ntibihagije. Payment ntivuga ko ibicuruzwa byatanzwe.
+- Uwayohereje yemera details mbere yo gusinya muri wallet; uwayohereje n'uwakiriye bombi babona `confirmed` iyo chain result, source, destination, asset, amount na invoice/reference byagenzuwe. Uwakiye ashobora kwemeza ko yabonye notification, ariko iyo acknowledgement ntiyemeza amafaranga. Reba `docs/PAYMENT_CONFIRMATION_PLAN.md`.
 - Nyuma y'ubwishyu bwemejwe, inyemezabwishyu ya IHUZA+ ijya muri Receipt Vault y'umukiriya n'umucuruzi. Refund cyangwa adjustment yandikwa ukwayo kandi igahuza n'inyandiko ya mbere; nta guhindura inyemezabwishyu ya kera bucece.
 - Iyo merchant akeka ko item itishyuwe, abanza kugenzura ibyo yatanze; ashobora gusaba adjustment. Umukiriya ashobora kuyemera cyangwa kuyijyaho impaka. Nta debit ikorwa nta bwemere bwe.
 
