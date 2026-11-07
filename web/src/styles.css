@@ -544,6 +544,34 @@ a {
   white-space:nowrap;
   color:#a5f3c9
 }
+.quote-form {
+  max-width:650px;
+  margin-top:24px;
+  padding:18px;
+  border:1px solid #ffffff24;
+  border-radius:12px
+}
+.quote-form[hidden] { display:none }
+.quote-form h3 { margin:0 0 8px }
+.quote-form p { color:#a9c6c7; font-size:13px; line-height:1.5 }
+.quote-item {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding:9px 0;
+  border-bottom:1px solid #ffffff20
+}
+.quote-item input {
+  width:70px;
+  padding:8px;
+  border:1px solid #ffffff40;
+  border-radius:8px;
+  background:#071a25;
+  color:#e9f4f4;
+  font:inherit
+}
+.quote-form button { margin-top:16px }
 .roadmap {
   background:#071a25
 }

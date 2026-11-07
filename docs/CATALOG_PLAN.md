@@ -2,6 +2,8 @@
 
 Iyi ni gahunda yasuzumwe mbere ya migration `005_merchant_products.sql`. Catalog iba off-chain, igiciro kigashyirwaho na nyiri merchant account. Kuri iyi prototype, `RWF` ni **ikimenyetso cy'igiciro mu bicuruzwa gusa**; nta RWF asset, wallet balance cyangwa payment bivuga.
 
+Nyuma ya catalog, API yongeyeho `POST /api/quote-preview`: umukiriya winjiye yohereza product IDs n'ingano, server ikongera gusoma ibiciro bya merchant wemewe, ikabara line totals na total mu buryo bwa integer minor units. Iyi ni preview gusa; nta invoice, payment intent cyangwa record ya ubwishyu ikorwa.
+
 ## Intambwe ya mbere
 
 - Ongeraho `merchant_products` muri `ihuza_web3_testnet` gusa: product UUID, merchant account, izina, `unit_price` ya decimal ifite digits 2, `currency_code = RWF`, n'igihe byandikiwe. Nta wallet address, seed cyangwa private data bijyamo.

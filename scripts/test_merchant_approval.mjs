@@ -152,12 +152,37 @@ try {
     { name: 'Umuceri', unit_price: '1000.50', currency_code: 'RWF' });
   assert.deepEqual(await (await request(3001, `/merchant-products/${applicant.qr_reference}`)).json(), [product]);
 
+  const smallProductResponse = await request(3001, '/merchant-products', { method: 'POST', cookie: applicant.cookie,
+    body: { name: 'Agapaki', unit_price: '0.01' } });
+  assert.equal(smallProductResponse.status, 201);
+  const smallProduct = await smallProductResponse.json();
+  const quotePath = '/quote-preview';
+  const quoteBody = { merchant_reference: applicant.qr_reference, items: [
+    { product_id: product.id, quantity: 3 }, { product_id: smallProduct.id, quantity: 2 },
+  ] };
+  assert.equal((await request(3001, quotePath, { method: 'POST', body: quoteBody })).status, 401);
+  assert.equal((await request(3001, quotePath, { method: 'POST', cookie: outsiderSession.cookie,
+    body: { ...quoteBody, total: '0.01' } })).status, 422);
+  assert.equal((await request(3001, quotePath, { method: 'POST', cookie: outsiderSession.cookie,
+    body: { ...quoteBody, items: [quoteBody.items[0], quoteBody.items[0]] } })).status, 400);
+  assert.equal((await request(3001, quotePath, { method: 'POST', cookie: outsiderSession.cookie,
+    body: { ...quoteBody, items: [{ product_id: product.id, quantity: 0 }] } })).status, 400);
+  const previewResponse = await request(3001, quotePath, { method: 'POST', cookie: outsiderSession.cookie, body: quoteBody });
+  assert.equal(previewResponse.status, 200);
+  assert.equal(previewResponse.headers.get('cache-control'), 'no-store');
+  const preview = await previewResponse.json();
+  assert.equal(preview.status, 'preview_only');
+  assert.equal(preview.currency_code, 'RWF');
+  assert.equal(preview.total, '3001.52');
+  assert.deepEqual(preview.lines.map((line) => line.line_total), ['3001.50', '0.02']);
+
   rotatedApi = startApi(3002, [reviewers[0].address, reviewers[1].address, outsider.address]);
   await waitForApi(3002, rotatedApi);
   assert.deepEqual(await (await request(3002, '/reviewer-status', { cookie: outsiderSession.cookie })).json(), { eligible: true });
   assert.deepEqual(await (await request(3002, `/qr/${applicant.qr_reference}`)).json(),
     { account_kind: 'person', flow: 'person_transfer_preview' });
   assert.equal((await request(3002, `/merchant-products/${applicant.qr_reference}`)).status, 403);
+  assert.equal((await request(3002, quotePath, { method: 'POST', cookie: outsiderSession.cookie, body: quoteBody })).status, 403);
   console.log('Merchant review and catalog check passed: quorum, signer gate, replay, price validation and reviewer-set rotation.');
 } finally {
   rotatedApi?.kill();

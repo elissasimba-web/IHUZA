@@ -19,3 +19,23 @@ test('merchant sets a positive display price and catalog uses one account refere
   assert.equal(calls[0][0], '/api/merchant-products');
   assert.equal(calls[1][0], `/api/merchant-products/${reference}`);
 });
+
+test('quote preview accepts only server-calculated lines and total', async () => {
+  const productId = '11111111-1111-4111-8111-111111111111';
+  const items = [{ product_id: productId, quantity: 3 }];
+  const preview = { status: 'preview_only', merchant_reference: reference, currency_code: 'RWF',
+    lines: [{ product_id: productId, name: 'Umuceri', quantity: 3, unit_price: '1000.50', line_total: '3001.50' }], total: '3001.50' };
+  const calls = [];
+  const service = createMerchantCatalogService(async (url, options) => {
+    calls.push({ url, options });
+    return { ok: true, json: async () => preview };
+  });
+  assert.deepEqual(await service.preview(reference, items), preview);
+  assert.equal(calls[0].url, '/api/quote-preview');
+  assert.equal(calls[0].options.credentials, 'same-origin');
+  assert.deepEqual(JSON.parse(calls[0].options.body), { merchant_reference: reference, items });
+  await assert.rejects(() => service.preview(reference, [...items, ...items]));
+  assert.equal(calls.length, 1);
+  preview.total = '1.00';
+  await assert.rejects(() => service.preview(reference, items));
+});

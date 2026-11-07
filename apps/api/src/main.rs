@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::{postgres::PgPoolOptions, PgPool, Row};
 use std::{
+    collections::HashSet,
     net::SocketAddr,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -629,6 +630,31 @@ fn canonical_price(value: &str) -> Option<String> {
     Some(format!("{whole}.{minor}"))
 }
 
+fn price_minor(value: &str) -> Option<i128> {
+    let canonical = canonical_price(value)?;
+    let (whole, fraction) = canonical.split_once('.')?;
+    whole
+        .parse::<i128>()
+        .ok()?
+        .checked_mul(100)?
+        .checked_add(fraction.parse::<i128>().ok()?)
+}
+
+fn minor_text(value: i128) -> String {
+    format!("{}.{:02}", value / 100, value % 100)
+}
+
+fn valid_uuid(value: &str) -> bool {
+    value.len() == 36
+        && value.bytes().enumerate().all(|(index, byte)| {
+            if [8, 13, 18, 23].contains(&index) {
+                byte == b'-'
+            } else {
+                byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)
+            }
+        })
+}
+
 async fn approval_count(
     state: &AppState,
     account_id: &str,
@@ -1073,6 +1099,109 @@ async fn list_products(
     Ok((response_headers, Json(products)))
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct QuoteItemRequest {
+    product_id: String,
+    quantity: u32,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct QuotePreviewRequest {
+    merchant_reference: String,
+    items: Vec<QuoteItemRequest>,
+}
+
+#[derive(Serialize)]
+struct QuoteLine {
+    product_id: String,
+    name: String,
+    quantity: u32,
+    unit_price: String,
+    line_total: String,
+}
+
+#[derive(Serialize)]
+struct QuotePreviewResponse {
+    status: &'static str,
+    merchant_reference: String,
+    currency_code: &'static str,
+    lines: Vec<QuoteLine>,
+    total: String,
+}
+
+async fn preview_quote(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(input): Json<QuotePreviewRequest>,
+) -> Result<(HeaderMap, Json<QuotePreviewResponse>), (StatusCode, Json<ErrorBody>)> {
+    require_origin(&headers)?;
+    session_account_id(&state.pool, &headers).await?;
+    if input.merchant_reference.len() != 43
+        || !input
+            .merchant_reference
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        || !(1..=20).contains(&input.items.len())
+    {
+        return Err(error(StatusCode::BAD_REQUEST, "Urutonde ntirwemewe."));
+    }
+    let mut seen = HashSet::new();
+    for item in &input.items {
+        if !valid_uuid(&item.product_id)
+            || !(1..=100).contains(&item.quantity)
+            || !seen.insert(&item.product_id)
+        {
+            return Err(error(StatusCode::BAD_REQUEST, "Ibicuruzwa ntibyemewe."));
+        }
+    }
+    let merchant_id: String =
+        sqlx::query_scalar("SELECT id::text FROM accounts WHERE qr_reference = $1")
+            .bind(&input.merchant_reference)
+            .fetch_optional(&state.pool)
+            .await
+            .map_err(internal_error)?
+            .ok_or_else(|| error(StatusCode::NOT_FOUND, "Konti ntiyabonetse."))?;
+    approved_merchant(&state, &merchant_id).await?;
+    let mut total_minor = 0_i128;
+    let mut lines = Vec::with_capacity(input.items.len());
+    for item in input.items {
+        let row = sqlx::query("SELECT name, unit_price::text AS unit_price FROM merchant_products WHERE id = $1::uuid AND merchant_account_id = $2::uuid")
+            .bind(&item.product_id).bind(&merchant_id)
+            .fetch_optional(&state.pool).await.map_err(internal_error)?
+            .ok_or_else(|| error(StatusCode::BAD_REQUEST, "Igicuruzwa ntikiri muri iyi catalog."))?;
+        let unit_price: String = row.try_get("unit_price").map_err(internal_error)?;
+        let unit_minor = price_minor(&unit_price)
+            .ok_or_else(|| error(StatusCode::INTERNAL_SERVER_ERROR, "Igiciro nticyemewe."))?;
+        let line_minor = unit_minor
+            .checked_mul(i128::from(item.quantity))
+            .ok_or_else(|| error(StatusCode::BAD_REQUEST, "Total irarenze."))?;
+        total_minor = total_minor
+            .checked_add(line_minor)
+            .ok_or_else(|| error(StatusCode::BAD_REQUEST, "Total irarenze."))?;
+        lines.push(QuoteLine {
+            product_id: item.product_id,
+            name: row.try_get("name").map_err(internal_error)?,
+            quantity: item.quantity,
+            unit_price,
+            line_total: minor_text(line_minor),
+        });
+    }
+    let mut response_headers = HeaderMap::new();
+    response_headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    Ok((
+        response_headers,
+        Json(QuotePreviewResponse {
+            status: "preview_only",
+            merchant_reference: input.merchant_reference,
+            currency_code: "RWF",
+            lines,
+            total: minor_text(total_minor),
+        }),
+    ))
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenvy::dotenv().ok();
@@ -1109,6 +1238,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .route("/api/merchant-products", post(create_product))
         .route("/api/merchant-products/{reference}", get(list_products))
+        .route("/api/quote-preview", post(preview_quote))
         .layer(DefaultBodyLimit::max(4096))
         .with_state(AppState { pool, reviewers });
     let bind = std::env::var("IHUZA_API_BIND").unwrap_or_else(|_| "127.0.0.1:3000".to_owned());
@@ -1123,7 +1253,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{canonical_price, qr_flow, valid_merchant_name, valid_product_name};
+    use super::{
+        canonical_price, minor_text, price_minor, qr_flow, valid_merchant_name, valid_product_name,
+        valid_uuid,
+    };
 
     #[test]
     fn merchant_qr_never_opens_checkout_without_approval() {
@@ -1148,5 +1281,15 @@ mod tests {
         for price in ["0.00", "01.00", "1", "1.234", "-1.00", "1e3", "1,000.00"] {
             assert!(canonical_price(price).is_none(), "{price}");
         }
+    }
+
+    #[test]
+    fn quote_uses_exact_minor_units_and_valid_product_ids() {
+        assert_eq!(price_minor("1000.50"), Some(100050));
+        assert_eq!(minor_text(100050 * 3), "3001.50");
+        assert_eq!(price_minor("0.01"), Some(1));
+        assert_eq!(minor_text(3), "0.03");
+        assert!(valid_uuid("22222222-2222-4222-8222-222222222222"));
+        assert!(!valid_uuid("22222222-2222-4222-8222-22222222222Z"));
     }
 }

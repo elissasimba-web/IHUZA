@@ -14,6 +14,12 @@ function validProduct(product) {
     product.currency_code === 'RWF';
 }
 
+function minorUnits(value) {
+  if (typeof value !== 'string' || !/^(?:0|[1-9][0-9]*)\.[0-9]{2}$/.test(value)) return null;
+  const [whole, fraction] = value.split('.');
+  return BigInt(whole) * 100n + BigInt(fraction);
+}
+
 export function createMerchantCatalogService(fetchImpl = fetch) {
   return {
     async create(name, unitPrice) {
@@ -35,6 +41,32 @@ export function createMerchantCatalogService(fetchImpl = fetch) {
       const products = await response.json();
       if (!Array.isArray(products) || products.length > 100 || !products.every(validProduct)) throw new Error('invalid catalog');
       return products;
+    },
+    async preview(reference, items) {
+      if (!referencePattern.test(reference) || !Array.isArray(items) || items.length < 1 || items.length > 20 ||
+          new Set(items.map((item) => item.product_id)).size !== items.length ||
+          !items.every((item) => typeof item.product_id === 'string' && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(item.product_id) &&
+            Number.isInteger(item.quantity) && item.quantity >= 1 && item.quantity <= 100)) throw new Error('invalid selection');
+      const response = await fetchImpl('/api/quote-preview', {
+        method: 'POST', credentials: 'same-origin', cache: 'no-store',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ merchant_reference: reference, items }),
+      });
+      if (!response.ok) throw new Error('quote preview unavailable');
+      const preview = await response.json();
+      if (preview?.status !== 'preview_only' || preview.merchant_reference !== reference || preview.currency_code !== 'RWF' ||
+          !Array.isArray(preview.lines) || preview.lines.length !== items.length) throw new Error('invalid quote preview');
+      let calculated = 0n;
+      for (let index = 0; index < items.length; index++) {
+        const line = preview.lines[index];
+        const unit = minorUnits(line?.unit_price);
+        const lineTotal = minorUnits(line?.line_total);
+        if (line?.product_id !== items[index].product_id || line.quantity !== items[index].quantity ||
+            typeof line.name !== 'string' || line.name.length < 2 || unit === null || lineTotal !== unit * BigInt(line.quantity)) throw new Error('invalid quote line');
+        calculated += lineTotal;
+      }
+      if (minorUnits(preview.total) !== calculated) throw new Error('invalid quote total');
+      return preview;
     },
   };
 }

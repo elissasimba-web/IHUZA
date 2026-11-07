@@ -2,6 +2,8 @@
 
 Ubusabe bw'umucuruzi wa testnet ubu busaba izina ry'uwasabye, iry'ubucuruzi n'irya company iyo rihari. Reviewers 2 muri 3 basinyira iyo profile yose. Votes za kera zasinyiraga izina ry'ubucuruzi gusa ntizongera gufungura merchant; si KYC, EBM cyangwa uburenganzira bwo gukora delivery.
 
+Umukiriya winjiye ashobora guhitamo ibicuruzwa muri catalog ya merchant wemewe, API ikabara **total y'agateganyo** ku biciro biri muri database. Nta invoice ibikwa, nta checkout cyangwa ubwishyu bukorwa; Smart Invoice iracyasaba migration ya snapshots n'idempotency.
+
 **One Account. Every Service.**
 
 IHUZA+ ni umushinga wa serivisi z'imari n'iz'ubucuruzi ugenewe u Rwanda. Ubu iyi repository ni **prototype ya Stellar Web3**; si app yuzuye cyangwa serivisi yakira amafaranga nyayo.

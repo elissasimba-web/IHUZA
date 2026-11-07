@@ -52,6 +52,9 @@ const productPrice = document.querySelector('#product-price');
 const productStatus = document.querySelector('#product-status');
 const ownProducts = document.querySelector('#own-products');
 const scanProducts = document.querySelector('#scan-products');
+const quoteForm = document.querySelector('#quote-form');
+const quoteItems = document.querySelector('#quote-items');
+const quoteResult = document.querySelector('#quote-result');
 
 const messages = {
   missing: ['Freighter ntiboneka', 'Shyira Freighter extension muri browser, hanyuma wongere ugenzure.'],
@@ -72,6 +75,7 @@ function clearOwnership() {
   challengeMessage.textContent = '';
   signButton.disabled = true;
   ownershipResult.hidden = true;
+  quoteForm.hidden = true;
   accountReference.textContent = '';
   accountQr.hidden = true;
   merchantApplicationForm.hidden = true;
@@ -185,6 +189,7 @@ async function restoreSession() {
   if (!session) {
     if (!ownershipResult.hidden) ownershipMessage.textContent = 'Session yarangiye. Ongera wemeze wallet yawe.';
     ownershipResult.hidden = true;
+    quoteForm.hidden = true;
     accountReference.textContent = '';
     accountQr.hidden = true;
     merchantApplicationForm.hidden = true;
@@ -295,6 +300,9 @@ scanForm.addEventListener('submit', async (event) => {
   scanResult.textContent = 'Turagenzura reference ya konti...';
   scanProducts.hidden = true;
   scanProducts.replaceChildren();
+  quoteForm.hidden = true;
+  quoteItems.replaceChildren();
+  quoteResult.textContent = '';
   const button = scanForm.querySelector('button');
   button.disabled = true;
   try {
@@ -308,10 +316,46 @@ scanForm.addEventListener('submit', async (event) => {
       const products = await merchantCatalog.list(scanReference.value.trim());
       showProducts(scanProducts, products);
       scanProducts.hidden = false;
+      if (products.length && !ownershipResult.hidden) {
+        for (const product of products) {
+          const row = document.createElement('label');
+          row.className = 'quote-item';
+          const name = document.createElement('span');
+          name.textContent = `${product.name} — ${product.unit_price} RWF`;
+          const quantity = document.createElement('input');
+          quantity.type = 'number';
+          quantity.min = '0';
+          quantity.max = '100';
+          quantity.step = '1';
+          quantity.value = '0';
+          quantity.dataset.productId = product.id;
+          quantity.setAttribute('aria-label', `Ingano ya ${product.name}`);
+          row.append(name, quantity);
+          quoteItems.append(row);
+        }
+        quoteForm.hidden = false;
+      }
+      if (products.length && ownershipResult.hidden) scanResult.textContent = 'Catalog iraboneka. Injira muri IHUZA+ kugira ngo ubare total y’agateganyo.';
       if (!products.length) scanResult.textContent = 'Iyi ni konti y’umucuruzi; nta bicuruzwa byashyizweho. Checkout ntirubakwa.';
     }
   } catch {
     scanResult.textContent = 'Ntitwabashije kugenzura reference. Ongera ugerageze.';
+  } finally {
+    button.disabled = false;
+  }
+});
+quoteForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const button = quoteForm.querySelector('button');
+  button.disabled = true;
+  quoteResult.textContent = 'Turabara total ku biciro biri kuri server...';
+  try {
+    const items = [...quoteItems.querySelectorAll('input')].filter((input) => Number(input.value) > 0)
+      .map((input) => ({ product_id: input.dataset.productId, quantity: Number(input.value) }));
+    const preview = await merchantCatalog.preview(scanReference.value.trim(), items);
+    quoteResult.textContent = `Total y’agateganyo: ${preview.total} RWF. Nta fagitire cyangwa ubwishyu byakozwe.`;
+  } catch {
+    quoteResult.textContent = 'Total ntiyabonetse. Hitamo ibicuruzwa, wemeze ko winjiye muri IHUZA+ kandi ko merchant akiri wemewe.';
   } finally {
     button.disabled = false;
   }
